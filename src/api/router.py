@@ -1,15 +1,16 @@
 """
 DataForge AI - Main API router.
 
-Aggregates all sub-routers (connections, warehouse, modeling, SQL, lineage,
-ETL) under a single ``APIRouter`` that the application mounts at ``/api/v1``.
+Aggregates all sub-routers (connections, warehouse, DDL builder, modeling,
+SQL, lineage, ETL) under a single ``APIRouter`` that the application mounts
+at ``/api/v1``.
 """
 
 from __future__ import annotations
 
 from fastapi import APIRouter
 
-from src.api.routes import connection, etl, lineage, modeling, sql, warehouse
+from src.api.routes import connection, ddl_builder, etl, lineage, modeling, sql, warehouse
 
 api_router = APIRouter(
     prefix="/api/v1",
@@ -28,6 +29,12 @@ api_router.include_router(
     warehouse.router,
     prefix="/warehouse",
     tags=["Warehouse"],
+)
+
+api_router.include_router(
+    ddl_builder.router,
+    prefix="/ddl",
+    tags=["DDL Builder"],
 )
 
 api_router.include_router(

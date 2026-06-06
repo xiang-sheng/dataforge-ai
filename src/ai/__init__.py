@@ -1,2 +1,2 @@
 # -*- coding: utf-8 -*-
-"""AI package for DataForge AI - LLM providers, SQL generation, modeling advice, and optimization."""
+"""AI package for DataForge AI - LLM providers, SQL generation, modeling advice, optimization, structured output parsing, and RAG context retrieval."""

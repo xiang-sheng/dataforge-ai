@@ -1,0 +1,328 @@
+# DataForge AI — Default Table Creation Convention
+# Place this file in your project root or specify the path in settings
+#
+# This convention follows the Alibaba OneData methodology with standard
+# warehouse layering: ODS -> DWD -> DWS -> ADS.
+#
+# Usage:
+#   - Via API: POST /api/v1/ddl/build with convention_path pointing to this file
+#   - Via CLI: dataforge ddl build --convention conventions/default_convention.yaml
+#   - Validate: POST /api/v1/ddl/convention/validate with this file path
+
+version: "1.0.0"
+description: "Default data warehouse table creation convention following OneData methodology"
+
+# ============================================================================
+# NAMING CONVENTIONS
+# ============================================================================
+#
+# Table names follow the pattern: {prefix}{domain}_{description}{suffix}
+# Examples:
+#   ods_trade_orders_di      (ODS layer, trade domain, daily increment)
+#   dwd_user_login_log_fact  (DWD layer, user domain, fact table)
+#   dws_product_sales_agg    (DWS layer, product domain, aggregation)
+#   ads_finance_revenue      (ADS layer, finance domain)
+
+naming:
+  # Template for constructing table names.
+  # Variables: {prefix}, {domain}, {description}, {suffix}
+  table_pattern: "{prefix}{domain}_{description}{suffix}"
+
+  # Case style enforced for all SQL identifiers (table names, column names).
+  # Supported: "snake_case", "camelCase", "UPPER_SNAKE"
+  case_style: "snake_case"
+
+  # Layer prefix rules — every table in a given layer must start with this prefix.
+  prefix_rules:
+    ODS: "ods_"
+    DWD: "dwd_"
+    DWS: "dws_"
+    ADS: "ads_"
+    DIM: "dim_"
+
+  # Table category suffixes — indicate the role or update strategy of the table.
+  suffix_rules:
+    daily_increment: "_di"
+    full_snapshot: "_df"
+    dimension: "_dim"
+    fact: "_fact"
+    aggregation: "_agg"
+
+  # Reserved SQL keywords that must never be used as table or column names.
+  # Using these causes syntax errors or ambiguous queries.
+  reserved_words:
+    - "order"
+    - "group"
+    - "select"
+    - "table"
+    - "index"
+    - "user"
+    - "key"
+    - "from"
+    - "where"
+    - "insert"
+    - "update"
+    - "delete"
+    - "drop"
+    - "create"
+    - "alter"
+    - "join"
+    - "union"
+    - "values"
+    - "set"
+    - "null"
+    - "true"
+    - "false"
+    - "case"
+    - "when"
+    - "then"
+    - "else"
+    - "end"
+    - "like"
+    - "between"
+    - "exists"
+    - "having"
+    - "limit"
+    - "offset"
+
+# ============================================================================
+# DATA TYPE STANDARDS
+# ============================================================================
+#
+# Every logical type maps to a specific physical type per target engine.
+# This ensures consistency across the warehouse regardless of which engine
+# the table is created on.
+#
+# Logical types (engine-agnostic): STRING, INTEGER, BIGINT, FLOAT, DOUBLE,
+# DECIMAL, BOOLEAN, DATE, TIMESTAMP, JSON
+#
+# Use the logical_to_physical mapping below.  The DDL auto-builder translates
+# source types to logical types first, then maps to the target engine.
+
+data_types:
+  # Logical type -> physical type per target engine.
+  logical_to_physical:
+    STRING:
+      clickhouse: "String"
+      hive: "STRING"
+      mysql: "VARCHAR(255)"
+      postgresql: "VARCHAR(255)"
+      doris: "VARCHAR(255)"
+      duckdb: "VARCHAR"
+
+    INTEGER:
+      clickhouse: "Int32"
+      hive: "INT"
+      mysql: "INT"
+      postgresql: "INTEGER"
+      doris: "INT"
+      duckdb: "INTEGER"
+
+    BIGINT:
+      clickhouse: "Int64"
+      hive: "BIGINT"
+      mysql: "BIGINT"
+      postgresql: "BIGINT"
+      doris: "BIGINT"
+      duckdb: "BIGINT"
+
+    FLOAT:
+      clickhouse: "Float32"
+      hive: "FLOAT"
+      mysql: "FLOAT"
+      postgresql: "REAL"
+      doris: "FLOAT"
+      duckdb: "FLOAT"
+
+    DOUBLE:
+      clickhouse: "Float64"
+      hive: "DOUBLE"
+      mysql: "DOUBLE"
+      postgresql: "DOUBLE PRECISION"
+      doris: "DOUBLE"
+      duckdb: "DOUBLE"
+
+    DECIMAL:
+      clickhouse: "Decimal(18, 2)"
+      hive: "DECIMAL(18, 2)"
+      mysql: "DECIMAL(18, 2)"
+      postgresql: "NUMERIC(18, 2)"
+      doris: "DECIMAL(18, 2)"
+      duckdb: "DECIMAL(18, 2)"
+
+    BOOLEAN:
+      clickhouse: "UInt8"
+      hive: "BOOLEAN"
+      mysql: "TINYINT(1)"
+      postgresql: "BOOLEAN"
+      doris: "BOOLEAN"
+      duckdb: "BOOLEAN"
+
+    DATE:
+      clickhouse: "Date"
+      hive: "DATE"
+      mysql: "DATE"
+      postgresql: "DATE"
+      doris: "DATE"
+      duckdb: "DATE"
+
+    TIMESTAMP:
+      clickhouse: "DateTime"
+      hive: "TIMESTAMP"
+      mysql: "DATETIME"
+      postgresql: "TIMESTAMP"
+      doris: "DATETIME"
+      duckdb: "TIMESTAMP"
+
+    JSON:
+      clickhouse: "String"
+      hive: "STRING"
+      mysql: "JSON"
+      postgresql: "JSONB"
+      doris: "STRING"
+      duckdb: "VARCHAR"
+
+  # Preferred types for common column roles.
+  # When the builder detects a column matching these roles, it uses the
+  # preferred type instead of inferring from the source.
+  preferred_types:
+    id_column: "BIGINT"
+    amount: "DECIMAL(18, 2)"
+    quantity: "INTEGER"
+    flag: "BOOLEAN"
+    code: "VARCHAR(50)"
+    description: "VARCHAR(500)"
+
+  # Forbidden types — these must never appear in generated DDL.
+  # They are either deprecated, inefficient, or engine-specific quirks.
+  forbidden_types:
+    - "TEXT"
+    - "BLOB"
+    - "MEDIUMTEXT"
+    - "LONGTEXT"
+    - "MEDIUMBLOB"
+    - "LONGBLOB"
+
+# ============================================================================
+# PARTITION CONVENTIONS
+# ============================================================================
+#
+# Partitioning is mandatory for ODS and DWD layers (high-volume raw data).
+# DWS and ADS may or may not be partitioned depending on query patterns.
+#
+# The default partition column is "dt" (date string in yyyy-MM-dd format).
+# For DWS/ADS layers, "stat_date" is used to distinguish the statistic date
+# from the ingestion date.
+
+partition:
+  # Default partition column name (used when no layer-specific override exists).
+  default_partition_column: "dt"
+
+  # Per-layer partition column override.
+  partition_by_layer:
+    ODS: "dt"
+    DWD: "dt"
+    DWS: "stat_date"
+    ADS: "stat_date"
+
+  # Data retention in days per layer.
+  # After this period, partitions are eligible for automatic cleanup.
+  # 0 means permanent retention (no auto-cleanup).
+  retention_days_by_layer:
+    ODS: 90
+    DWD: 365
+    DWS: 730
+    ADS: 1095
+
+  # Partition granularity: "daily", "hourly", or "monthly".
+  granularity: "daily"
+
+# ============================================================================
+# COMMENT CONVENTIONS
+# ============================================================================
+#
+# Every table and every column must have a descriptive comment.
+# Comments serve as inline documentation and improve discoverability.
+#
+# Table comment pattern: "[{layer}] {description}"
+# Example: "[ODS] Raw order data from MySQL production"
+# Example: "[DWD] Cleansed and deduplicated user login events"
+
+comments:
+  # Whether a COMMENT clause is required on every CREATE TABLE.
+  table_comment_required: true
+
+  # Whether every column must have a COMMENT.
+  column_comment_required: true
+
+  # Regex or template that table comments must match.
+  # The builder uses this to auto-generate comments when missing.
+  table_comment_pattern: "[{layer}] {description}"
+
+  # Minimum character length for column comments.
+  # Short comments like "ID" or "FK" are insufficient.
+  column_comment_min_length: 3
+
+# ============================================================================
+# QUALITY CONSTRAINTS
+# ============================================================================
+#
+# Data quality rules enforced at the schema level.
+# These generate NOT NULL, UNIQUE, and CHECK constraints in the DDL.
+
+quality:
+  # Every table must declare at least one primary key column.
+  primary_key_required: true
+
+  # Glob patterns for column names that must be NOT NULL.
+  # Columns matching these patterns will have NOT NULL added automatically.
+  not_null_columns:
+    - "*_id"
+    - "*_key"
+    - "dt"
+    - "etl_time"
+
+  # Glob patterns for columns that should have a UNIQUE constraint.
+  unique_constraints:
+    - "*_sk"
+
+  # Column-level CHECK constraints.
+  # "column_pattern" is a substring match against column names.
+  # "rule" is a SQL expression that must evaluate to TRUE.
+  check_constraints:
+    - column_pattern: "amount"
+      rule: ">= 0"
+    - column_pattern: "quantity"
+      rule: ">= 0"
+    - column_pattern: "rate"
+      rule: ">= 0 AND <= 1"
+
+# ============================================================================
+# STORAGE CONVENTIONS
+# ============================================================================
+#
+# Default storage format and compression codec per target engine.
+# These are applied when the DDL builder generates engine-specific clauses
+# (e.g. STORED AS for Hive, ENGINE = for ClickHouse).
+
+storage:
+  # Preferred storage format per engine.
+  default_format_by_engine:
+    clickhouse: "MergeTree"
+    hive: "ORC"
+    doris: ""
+    mysql: "InnoDB"
+    postgresql: ""
+    duckdb: ""
+
+  # Preferred compression codec per engine.
+  compression_by_engine:
+    clickhouse: "LZ4"
+    hive: "SNAPPY"
+
+  # Index strategy hints — human-readable guidance for index design.
+  # These are advisory only and not enforced in DDL generation.
+  index_strategy:
+    bitmap: "for low-cardinality string columns (< 1000 distinct values)"
+    btree: "for primary keys and foreign keys"
+    minmax: "for ClickHouse partition/order key columns"

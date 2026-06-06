@@ -204,6 +204,89 @@ class AppSettings(BaseSettings):
     )
 
     # ------------------------------------------------------------------ #
+    # LLM provider selection & Ollama / local model settings
+    # ------------------------------------------------------------------ #
+
+    llm_provider: str = Field(
+        default="openai",
+        description=(
+            "Active LLM provider. Supported values: openai, azure_openai, "
+            "ollama, tongyi (通义千问), deepseek, local."
+        ),
+    )
+
+    ollama_base_url: str = Field(
+        default="http://localhost:11434",
+        description="Ollama server URL. Default is the local Ollama instance.",
+    )
+
+    ollama_model: str = Field(
+        default="qwen2.5:14b",
+        description=(
+            "Default Ollama model. Recommended choices for data engineering: "
+            "qwen2.5:14b, deepseek-coder-v2:16b, llama3.1:8b, codellama:13b."
+        ),
+    )
+
+    ollama_temperature: float = Field(
+        default=0.1,
+        ge=0.0,
+        le=2.0,
+        description="Sampling temperature for Ollama models.",
+    )
+
+    ollama_request_timeout: int = Field(
+        default=300,
+        ge=10,
+        description=(
+            "HTTP timeout in seconds for Ollama API calls. "
+            "Local models may be slower than cloud APIs, so the default is higher."
+        ),
+    )
+
+    # ------------------------------------------------------------------ #
+    # DuckDB local sandbox settings
+    # ------------------------------------------------------------------ #
+
+    duckdb_enabled: bool = Field(
+        default=True,
+        description="Whether the DuckDB local verification sandbox is enabled.",
+    )
+
+    duckdb_database_path: str = Field(
+        default=":memory:",
+        description=(
+            "DuckDB database path. ':memory:' for in-memory (default, no persistence), "
+            "or a file path like './dataforge_sandbox.duckdb' for persistent storage."
+        ),
+    )
+
+    duckdb_verify_sample_rows: int = Field(
+        default=100,
+        ge=10,
+        le=10_000,
+        description="Number of sample rows to generate for DuckDB sandbox verification.",
+    )
+
+    duckdb_memory_limit_mb: int = Field(
+        default=512,
+        ge=64,
+        description="Memory limit for the DuckDB sandbox in megabytes.",
+    )
+
+    # ------------------------------------------------------------------ #
+    # Convention file settings
+    # ------------------------------------------------------------------ #
+
+    convention_file_path: Optional[str] = Field(
+        default=None,
+        description=(
+            "Path to the default table creation convention file (YAML or Markdown). "
+            "If set, DDL generation will follow these naming/type/partition rules."
+        ),
+    )
+
+    # ------------------------------------------------------------------ #
     # Query execution limits
     # ------------------------------------------------------------------ #
 

@@ -1,10 +1,15 @@
 # -*- coding: utf-8 -*-
 """
-DataForge AI - AI provider abstraction layer.
+DataForge AI - AI provider abstraction layer (LangChain edition).
 
 Provides a unified interface for interacting with multiple LLM backends
-(OpenAI, Anthropic, local models, etc.) with built-in rate limiting,
+(OpenAI, Azure OpenAI, Ollama, Tongyi/通义千问, DeepSeek, etc.) via
+LangChain's ``BaseChatModel`` abstraction.  Includes built-in rate limiting,
 automatic retry, token-usage tracking, and streaming support.
+
+Backward-compatible: the original data models (``TokenUsage``, ``ChatMessage``,
+``AIResponse``, ``StreamChunk``, ``ProviderConfig``) and the ``BaseAIProvider``
+abstract interface are preserved so that existing callers do not need to change.
 """
 
 from __future__ import annotations
@@ -23,8 +28,20 @@ from typing import (
     List,
     Optional,
     Sequence,
+    Type,
     Union,
 )
+
+from langchain_core.callbacks import BaseCallbackHandler
+from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import (
+    AIMessage,
+    AIMessageChunk,
+    BaseMessage,
+    HumanMessage,
+    SystemMessage,
+)
+from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult, LLMResult
 
 logger = logging.getLogger(__name__)
 
@@ -40,6 +57,9 @@ class ModelProvider(str, Enum):
     ANTHROPIC = "anthropic"
     AZURE_OPENAI = "azure_openai"
     LOCAL = "local"
+    OLLAMA = "ollama"
+    TONGYI = "tongyi"
+    DEEPSEEK = "deepseek"
 
 
 @dataclass
@@ -84,6 +104,15 @@ class ChatMessage:
         if self.name:
             payload["name"] = self.name
         return payload
+
+    def to_langchain_message(self) -> BaseMessage:
+        """Convert to the corresponding LangChain message type."""
+        if self.role == "system":
+            return SystemMessage(content=self.content)
+        if self.role == "assistant":
+            return AIMessage(content=self.content)
+        # Default: treat as human / user message
+        return HumanMessage(content=self.content)
 
 
 @dataclass
@@ -226,6 +255,84 @@ class RateLimiter:
             tokens_used: The actual number of tokens consumed.
         """
         self._token_records.append((time.monotonic(), tokens_used))
+
+
+# ---------------------------------------------------------------------------
+# Token-usage callback handler
+# ---------------------------------------------------------------------------
+
+class TokenUsageCallbackHandler(BaseCallbackHandler):
+    """LangChain callback handler that accumulates token usage across calls.
+
+    Attach an instance to a ``LangChainProvider`` (or pass it directly to a
+    LangChain model's ``callbacks`` list) to transparently track token
+    consumption without inspecting raw responses.
+
+    Attributes:
+        total_usage: Cumulative ``TokenUsage`` across all observed LLM calls.
+        last_usage: ``TokenUsage`` from the most recent LLM call.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.total_usage = TokenUsage()
+        self.last_usage = TokenUsage()
+        self._lock = asyncio.Lock()
+
+    # -- Synchronous callbacks ------------------------------------------------
+
+    def on_llm_end(self, response: LLMResult, **kwargs: Any) -> None:
+        """Called when a non-streaming LLM call finishes."""
+        self._process_llm_result(response)
+
+    def on_llm_error(self, error: BaseException, **kwargs: Any) -> None:
+        """Called when an LLM call raises an error — nothing to record."""
+        logger.debug("TokenUsageCallbackHandler: LLM error observed: %s", error)
+
+    # -- Async callbacks ------------------------------------------------------
+
+    async def on_llm_end_async(self, response: LLMResult, **kwargs: Any) -> None:
+        """Async variant of ``on_llm_end``."""
+        self._process_llm_result(response)
+
+    # -- Internal helpers -----------------------------------------------------
+
+    def _process_llm_result(self, response: LLMResult) -> None:
+        """Extract token counts from an ``LLMResult`` and accumulate them."""
+        prompt_tokens = 0
+        completion_tokens = 0
+        total_tokens = 0
+
+        # LangChain stores token usage in llm_output (provider-specific key)
+        llm_output = response.llm_output or {}
+        token_usage_dict = llm_output.get("token_usage", llm_output.get("usage", {}))
+        if isinstance(token_usage_dict, dict):
+            prompt_tokens = token_usage_dict.get("prompt_tokens", 0)
+            completion_tokens = token_usage_dict.get("completion_tokens", 0)
+            total_tokens = token_usage_dict.get("total_tokens", 0)
+
+        # Fallback: attempt to derive from generation info
+        if total_tokens == 0:
+            for generation_list in response.generations:
+                for gen in generation_list:
+                    gen_info = getattr(gen, "generation_info", {}) or {}
+                    usage = gen_info.get("usage", {})
+                    prompt_tokens += usage.get("prompt_tokens", 0)
+                    completion_tokens += usage.get("completion_tokens", 0)
+                    total_tokens += usage.get("total_tokens", 0)
+
+        usage = TokenUsage(
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+        )
+        self.last_usage = usage
+        self.total_usage = self.total_usage + usage
+
+    def reset(self) -> None:
+        """Reset all accumulated counters to zero."""
+        self.total_usage = TokenUsage()
+        self.last_usage = TokenUsage()
 
 
 # ---------------------------------------------------------------------------
@@ -434,89 +541,341 @@ class BaseAIProvider(ABC):
 
 
 # ---------------------------------------------------------------------------
-# OpenAI provider
+# LLM factory — create LangChain ChatModel instances from config
 # ---------------------------------------------------------------------------
 
-class OpenAIProvider(BaseAIProvider):
-    """AI provider implementation backed by the OpenAI Chat Completions API.
+class LLMFactory:
+    """Factory for creating LangChain ``BaseChatModel`` instances.
 
-    This provider supports ``gpt-4o``, ``gpt-4o-mini``, ``gpt-4-turbo``,
-    ``o1-*`` reasoning models, and any other model accessible through the
-    OpenAI-compatible API (including Azure OpenAI and self-hosted proxies
-    like vLLM or LiteLLM by setting ``base_url``).
+    Translates a :class:`ProviderConfig` into the appropriate LangChain chat
+    model class with the correct constructor arguments.
+
+    Supported providers:
+        * ``openai`` — :class:`langchain_openai.ChatOpenAI`
+        * ``azure_openai`` — :class:`langchain_openai.AzureChatOpenAI`
+        * ``ollama`` — :class:`langchain_community.chat_models.ChatOllama`
+        * ``tongyi`` — :class:`langchain_community.chat_models.ChatTongyi`
+        * ``deepseek`` — :class:`langchain_openai.ChatOpenAI` (OpenAI-compatible)
+
+    Usage::
+
+        config = ProviderConfig(provider=ModelProvider.OPENAI, api_key="sk-...")
+        model = LLMFactory.create_chat_model(config)
+        response = await model.ainvoke([HumanMessage(content="Hello")])
+    """
+
+    @staticmethod
+    def create_chat_model(
+        config: ProviderConfig,
+        *,
+        callbacks: Optional[List[BaseCallbackHandler]] = None,
+    ) -> BaseChatModel:
+        """Instantiate and return a LangChain ``BaseChatModel``.
+
+        Args:
+            config: Provider configuration specifying which backend to use.
+            callbacks: Optional list of LangChain callback handlers to attach
+                to the model (e.g. for token-usage tracking).
+
+        Returns:
+            A configured ``BaseChatModel`` instance ready for ``invoke`` /
+            ``ainvoke`` / ``stream`` / ``astream`` calls.
+
+        Raises:
+            ValueError: If the requested provider is not supported.
+            ImportError: If the required LangChain integration package is not
+                installed.
+        """
+        provider = config.provider
+        common_kwargs: Dict[str, Any] = {
+            "temperature": config.temperature,
+            "max_tokens": config.max_tokens,
+            "request_timeout": config.timeout,
+            "max_retries": config.max_retries,
+        }
+        if callbacks:
+            common_kwargs["callbacks"] = callbacks
+
+        # Merge any extra provider-specific kwargs
+        common_kwargs.update(config.extra)
+
+        if provider == ModelProvider.OPENAI:
+            return LLMFactory._create_openai(config, common_kwargs)
+        if provider == ModelProvider.AZURE_OPENAI:
+            return LLMFactory._create_azure_openai(config, common_kwargs)
+        if provider == ModelProvider.OLLAMA or provider == ModelProvider.LOCAL:
+            return LLMFactory._create_ollama(config, common_kwargs)
+        if provider == ModelProvider.TONGYI:
+            return LLMFactory._create_tongyi(config, common_kwargs)
+        if provider == ModelProvider.DEEPSEEK:
+            return LLMFactory._create_deepseek(config, common_kwargs)
+
+        raise ValueError(
+            f"Unsupported provider: {provider.value}. "
+            f"Supported providers: openai, azure_openai, ollama, local, tongyi, deepseek."
+        )
+
+    # -- Provider-specific constructors --------------------------------------
+
+    @staticmethod
+    def _create_openai(
+        config: ProviderConfig,
+        common_kwargs: Dict[str, Any],
+    ) -> BaseChatModel:
+        """Create a :class:`ChatOpenAI` instance."""
+        try:
+            from langchain_openai import ChatOpenAI
+        except ImportError as exc:
+            raise ImportError(
+                "langchain-openai is required for OpenAI support. "
+                "Install it with:  pip install langchain-openai>=0.3.0"
+            ) from exc
+
+        kwargs: Dict[str, Any] = {
+            "model": config.model,
+            **common_kwargs,
+        }
+        if config.api_key:
+            kwargs["api_key"] = config.api_key
+        if config.base_url:
+            kwargs["base_url"] = config.base_url
+        return ChatOpenAI(**kwargs)
+
+    @staticmethod
+    def _create_azure_openai(
+        config: ProviderConfig,
+        common_kwargs: Dict[str, Any],
+    ) -> BaseChatModel:
+        """Create an :class:`AzureChatOpenAI` instance."""
+        try:
+            from langchain_openai import AzureChatOpenAI
+        except ImportError as exc:
+            raise ImportError(
+                "langchain-openai is required for Azure OpenAI support. "
+                "Install it with:  pip install langchain-openai>=0.3.0"
+            ) from exc
+
+        kwargs: Dict[str, Any] = {
+            "model": config.model,
+            **common_kwargs,
+        }
+        if config.api_key:
+            kwargs["api_key"] = config.api_key
+        if config.base_url:
+            kwargs["azure_endpoint"] = config.base_url
+        # Azure-specific fields that may be supplied via extra
+        if "azure_deployment" not in kwargs:
+            kwargs["azure_deployment"] = config.model
+        if "api_version" not in kwargs:
+            kwargs["api_version"] = "2024-02-01"
+        return AzureChatOpenAI(**kwargs)
+
+    @staticmethod
+    def _create_ollama(
+        config: ProviderConfig,
+        common_kwargs: Dict[str, Any],
+    ) -> BaseChatModel:
+        """Create a :class:`ChatOllama` instance for local model inference."""
+        try:
+            from langchain_community.chat_models import ChatOllama
+        except ImportError as exc:
+            raise ImportError(
+                "langchain-community is required for Ollama support. "
+                "Install it with:  pip install langchain-community>=0.3.0"
+            ) from exc
+
+        # ChatOllama does not accept api_key or max_retries; filter them out
+        ollama_kwargs = {
+            k: v for k, v in common_kwargs.items()
+            if k not in ("max_retries",)
+        }
+        return ChatOllama(
+            model=config.model,
+            base_url=config.base_url or "http://localhost:11434",
+            **ollama_kwargs,
+        )
+
+    @staticmethod
+    def _create_tongyi(
+        config: ProviderConfig,
+        common_kwargs: Dict[str, Any],
+    ) -> BaseChatModel:
+        """Create a :class:`ChatTongyi` instance for Alibaba Tongyi (通义千问)."""
+        try:
+            from langchain_community.chat_models import ChatTongyi
+        except ImportError as exc:
+            raise ImportError(
+                "langchain-community is required for Tongyi support. "
+                "Install it with:  pip install langchain-community>=0.3.0"
+            ) from exc
+
+        kwargs: Dict[str, Any] = {
+            "model": config.model,
+            **common_kwargs,
+        }
+        if config.api_key:
+            kwargs["dashscope_api_key"] = config.api_key
+        return ChatTongyi(**kwargs)
+
+    @staticmethod
+    def _create_deepseek(
+        config: ProviderConfig,
+        common_kwargs: Dict[str, Any],
+    ) -> BaseChatModel:
+        """Create a :class:`ChatOpenAI` instance pointed at the DeepSeek API.
+
+        DeepSeek exposes an OpenAI-compatible endpoint, so we reuse
+        ``ChatOpenAI`` with the appropriate ``base_url``.
+        """
+        try:
+            from langchain_openai import ChatOpenAI
+        except ImportError as exc:
+            raise ImportError(
+                "langchain-openai is required for DeepSeek support. "
+                "Install it with:  pip install langchain-openai>=0.3.0"
+            ) from exc
+
+        kwargs: Dict[str, Any] = {
+            "model": config.model,
+            **common_kwargs,
+        }
+        if config.api_key:
+            kwargs["api_key"] = config.api_key
+        kwargs["base_url"] = config.base_url or "https://api.deepseek.com"
+        return ChatOpenAI(**kwargs)
+
+
+# ---------------------------------------------------------------------------
+# LangChain-backed provider
+# ---------------------------------------------------------------------------
+
+class LangChainProvider(BaseAIProvider):
+    """AI provider implementation backed by LangChain's ``BaseChatModel``.
+
+    This is the primary provider for all supported LLM backends.  It delegates
+    to the model created by :class:`LLMFactory` and uses LangChain's
+    ``invoke`` / ``ainvoke`` / ``stream`` / ``astream`` methods under the hood.
+
+    Token usage is tracked automatically via :class:`TokenUsageCallbackHandler`
+    and merged into the provider-level cumulative counter.
 
     Args:
-        config: Provider configuration.  ``provider`` is ignored since this
-            class is hard-coded to OpenAI.
+        config: Provider configuration specifying which backend to use.
+
+    Example::
+
+        config = ProviderConfig(
+            provider=ModelProvider.OPENAI,
+            api_key="sk-...",
+            model="gpt-4o",
+        )
+        provider = LangChainProvider(config)
+        response = await provider.generate("Write a SQL query to count users.")
+        print(response.content)
     """
 
     def __init__(self, config: ProviderConfig) -> None:
         super().__init__(config)
-        self._client: Any = None  # Lazy-initialized openai.AsyncOpenAI
+        self._callback_handler = TokenUsageCallbackHandler()
+        self._model: Optional[BaseChatModel] = None
 
-    def _get_client(self) -> Any:
-        """Lazily create and cache the ``openai.AsyncOpenAI`` client."""
-        if self._client is None:
-            try:
-                from openai import AsyncOpenAI
-            except ImportError as exc:
-                raise ImportError(
-                    "The 'openai' package is required for OpenAIProvider.  "
-                    "Install it with:  pip install openai>=1.0"
-                ) from exc
+    @property
+    def model(self) -> BaseChatModel:
+        """Lazily create and return the underlying LangChain chat model."""
+        if self._model is None:
+            self._model = LLMFactory.create_chat_model(
+                self._config,
+                callbacks=[self._callback_handler],
+            )
+        return self._model
 
-            client_kwargs: Dict[str, Any] = {}
-            if self._config.api_key:
-                client_kwargs["api_key"] = self._config.api_key
-            if self._config.base_url:
-                client_kwargs["base_url"] = self._config.base_url
-            client_kwargs["timeout"] = self._config.timeout
+    @property
+    def callback_handler(self) -> TokenUsageCallbackHandler:
+        """Return the token-usage callback handler attached to this provider."""
+        return self._callback_handler
 
-            self._client = AsyncOpenAI(**client_kwargs)
-        return self._client
+    # -- Internal helpers -----------------------------------------------------
 
-    def _build_params(
+    @staticmethod
+    def _build_messages(
+        prompt: str,
+        *,
+        system: Optional[str] = None,
+    ) -> List[BaseMessage]:
+        """Construct a LangChain message list from a single prompt string."""
+        messages: List[BaseMessage] = []
+        if system:
+            messages.append(SystemMessage(content=system))
+        messages.append(HumanMessage(content=prompt))
+        return messages
+
+    @staticmethod
+    def _chat_messages_to_langchain(
+        messages: List[ChatMessage],
+    ) -> List[BaseMessage]:
+        """Convert a list of :class:`ChatMessage` to LangChain message objects."""
+        return [m.to_langchain_message() for m in messages]
+
+    def _extract_usage_from_ai_message(self, ai_message: AIMessage) -> TokenUsage:
+        """Extract token usage from an ``AIMessage``'s ``usage_metadata``.
+
+        LangChain >= 0.3 attaches ``usage_metadata`` to ``AIMessage`` when the
+        provider returns token counts.  Falls back to the callback handler's
+        ``last_usage`` when metadata is unavailable.
+        """
+        usage_meta = getattr(ai_message, "usage_metadata", None)
+        if usage_meta and isinstance(usage_meta, dict):
+            return TokenUsage(
+                prompt_tokens=usage_meta.get("input_tokens", 0),
+                completion_tokens=usage_meta.get("output_tokens", 0),
+                total_tokens=usage_meta.get("total_tokens", 0),
+            )
+        # Fallback: use the callback handler's last recorded usage
+        return self._callback_handler.last_usage
+
+    @staticmethod
+    def _extract_finish_reason(ai_message: AIMessage) -> Optional[str]:
+        """Extract a finish-reason string from an ``AIMessage``."""
+        response_metadata = getattr(ai_message, "response_metadata", {}) or {}
+        # OpenAI-style
+        finish = response_metadata.get("finish_reason")
+        if finish:
+            return finish
+        # Some providers use "stop_reason"
+        return response_metadata.get("stop_reason")
+
+    def _build_model_overrides(
         self,
         *,
-        messages: List[Dict[str, Any]],
         temperature: Optional[float] = None,
         max_tokens: Optional[int] = None,
         stop: Optional[Sequence[str]] = None,
-        stream: bool = False,
-        **extra: Any,
     ) -> Dict[str, Any]:
-        """Assemble the parameter dict for ``client.chat.completions.create``."""
-        params: Dict[str, Any] = {
-            "model": self._config.model,
-            "messages": messages,
-            "temperature": temperature if temperature is not None else self._config.temperature,
-            "max_tokens": max_tokens if max_tokens is not None else self._config.max_tokens,
-            "stream": stream,
-        }
-        if stop:
-            params["stop"] = list(stop)
-        params.update(extra)
-        return params
+        """Build a dict of per-request model parameter overrides.
 
-    @staticmethod
-    def _parse_response(response: Any) -> AIResponse:
-        """Convert an OpenAI ``ChatCompletion`` object to ``AIResponse``."""
-        choice = response.choices[0]
-        usage_data = response.usage
-        usage = TokenUsage(
-            prompt_tokens=getattr(usage_data, "prompt_tokens", 0),
-            completion_tokens=getattr(usage_data, "completion_tokens", 0),
-            total_tokens=getattr(usage_data, "total_tokens", 0),
-        )
-        return AIResponse(
-            content=choice.message.content or "",
-            model=response.model,
-            usage=usage,
-            finish_reason=choice.finish_reason,
-            raw=response,
-        )
+        These are forwarded to LangChain's ``invoke`` / ``stream`` via the
+        model's ``bind`` mechanism or as config overrides.
+        """
+        overrides: Dict[str, Any] = {}
+        if temperature is not None:
+            overrides["temperature"] = temperature
+        if max_tokens is not None:
+            overrides["max_tokens"] = max_tokens
+        if stop is not None:
+            overrides["stop"] = list(stop)
+        return overrides
 
-    # -- Core interface -----------------------------------------------------
+    def _get_effective_model(
+        self,
+        overrides: Dict[str, Any],
+    ) -> BaseChatModel:
+        """Return the chat model, optionally bound with per-request overrides."""
+        model = self.model
+        if overrides:
+            return model.bind(**overrides)
+        return model
+
+    # -- Core interface -------------------------------------------------------
 
     async def generate(
         self,
@@ -530,29 +889,30 @@ class OpenAIProvider(BaseAIProvider):
     ) -> AIResponse:
         """Generate a completion from a single prompt string.
 
-        Constructs a two-message conversation (system + user) and delegates
-        to the OpenAI Chat Completions API.
+        Constructs a system + user message pair and delegates to the LangChain
+        chat model's ``ainvoke`` method.
         """
-        messages: List[Dict[str, Any]] = []
-        if system:
-            messages.append({"role": "system", "content": system})
-        messages.append({"role": "user", "content": prompt})
+        lc_messages = self._build_messages(prompt, system=system)
+        overrides = self._build_model_overrides(
+            temperature=temperature,
+            max_tokens=max_tokens,
+            stop=stop,
+        )
 
         async def _call() -> AIResponse:
             await self._rate_limiter.acquire(estimated_tokens=len(prompt) // 4)
-            client = self._get_client()
-            params = self._build_params(
-                messages=messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                stop=stop,
-                **kwargs,
+            model = self._get_effective_model(overrides)
+            ai_message: AIMessage = await model.ainvoke(lc_messages)
+            usage = self._extract_usage_from_ai_message(ai_message)
+            self._record_usage(usage)
+            self._rate_limiter.record_usage(usage.total_tokens)
+            return AIResponse(
+                content=ai_message.content or "",
+                model=self._config.model,
+                usage=usage,
+                finish_reason=self._extract_finish_reason(ai_message),
+                raw=ai_message,
             )
-            response = await client.chat.completions.create(**params)
-            ai_resp = self._parse_response(response)
-            self._record_usage(ai_resp.usage)
-            self._rate_limiter.record_usage(ai_resp.usage.total_tokens)
-            return ai_resp
 
         return await self._retry_with_backoff(_call)
 
@@ -566,24 +926,28 @@ class OpenAIProvider(BaseAIProvider):
         **kwargs: Any,
     ) -> AIResponse:
         """Generate a completion from a multi-turn chat conversation."""
-        raw_messages = [m.to_dict() for m in messages]
+        lc_messages = self._chat_messages_to_langchain(messages)
+        overrides = self._build_model_overrides(
+            temperature=temperature,
+            max_tokens=max_tokens,
+            stop=stop,
+        )
 
         async def _call() -> AIResponse:
             total_chars = sum(len(m.content) for m in messages)
             await self._rate_limiter.acquire(estimated_tokens=total_chars // 4)
-            client = self._get_client()
-            params = self._build_params(
-                messages=raw_messages,
-                temperature=temperature,
-                max_tokens=max_tokens,
-                stop=stop,
-                **kwargs,
+            model = self._get_effective_model(overrides)
+            ai_message: AIMessage = await model.ainvoke(lc_messages)
+            usage = self._extract_usage_from_ai_message(ai_message)
+            self._record_usage(usage)
+            self._rate_limiter.record_usage(usage.total_tokens)
+            return AIResponse(
+                content=ai_message.content or "",
+                model=self._config.model,
+                usage=usage,
+                finish_reason=self._extract_finish_reason(ai_message),
+                raw=ai_message,
             )
-            response = await client.chat.completions.create(**params)
-            ai_resp = self._parse_response(response)
-            self._record_usage(ai_resp.usage)
-            self._rate_limiter.record_usage(ai_resp.usage.total_tokens)
-            return ai_resp
 
         return await self._retry_with_backoff(_call)
 
@@ -624,37 +988,29 @@ class OpenAIProvider(BaseAIProvider):
         max_tokens: Optional[int] = None,
         **kwargs: Any,
     ) -> AsyncIterator[StreamChunk]:
-        """Stream a completion from a single prompt."""
-        messages: List[Dict[str, Any]] = []
-        if system:
-            messages.append({"role": "system", "content": system})
-        messages.append({"role": "user", "content": prompt})
-
-        await self._rate_limiter.acquire(estimated_tokens=len(prompt) // 4)
-        client = self._get_client()
-        params = self._build_params(
-            messages=messages,
+        """Stream a completion from a single prompt, yielding chunks."""
+        lc_messages = self._build_messages(prompt, system=system)
+        overrides = self._build_model_overrides(
             temperature=temperature,
             max_tokens=max_tokens,
-            stream=True,
-            **kwargs,
         )
-        stream = await client.chat.completions.create(**params)
+
+        await self._rate_limiter.acquire(estimated_tokens=len(prompt) // 4)
+        model = self._get_effective_model(overrides)
+
         accumulated_tokens = 0
+        async for chunk in model.astream(lc_messages):
+            delta_text = chunk.content if isinstance(chunk.content, str) else ""
+            accumulated_tokens += max(1, len(delta_text) // 4) if delta_text else 0
 
-        async for raw_chunk in stream:
-            if not raw_chunk.choices:
-                continue
-            delta_obj = raw_chunk.choices[0].delta
-            delta_text = getattr(delta_obj, "content", "") or ""
-            finish = raw_chunk.choices[0].finish_reason
-            accumulated_tokens += max(1, len(delta_text) // 4)
+            finish_reason: Optional[str] = None
+            response_metadata = getattr(chunk, "response_metadata", {}) or {}
+            finish_reason = response_metadata.get("finish_reason")
 
-            chunk = StreamChunk(
+            yield StreamChunk(
                 delta=delta_text,
-                finish_reason=finish,
+                finish_reason=finish_reason,
             )
-            yield chunk
 
         # Record approximate usage after streaming completes
         approx_usage = TokenUsage(
@@ -673,30 +1029,29 @@ class OpenAIProvider(BaseAIProvider):
         **kwargs: Any,
     ) -> AsyncIterator[StreamChunk]:
         """Stream a chat completion, yielding chunks."""
-        raw_messages = [m.to_dict() for m in messages]
-        total_chars = sum(len(m.content) for m in messages)
-
-        await self._rate_limiter.acquire(estimated_tokens=total_chars // 4)
-        client = self._get_client()
-        params = self._build_params(
-            messages=raw_messages,
+        lc_messages = self._chat_messages_to_langchain(messages)
+        overrides = self._build_model_overrides(
             temperature=temperature,
             max_tokens=max_tokens,
-            stream=True,
-            **kwargs,
         )
-        stream = await client.chat.completions.create(**params)
+
+        total_chars = sum(len(m.content) for m in messages)
+        await self._rate_limiter.acquire(estimated_tokens=total_chars // 4)
+        model = self._get_effective_model(overrides)
+
         accumulated_tokens = 0
+        async for chunk in model.astream(lc_messages):
+            delta_text = chunk.content if isinstance(chunk.content, str) else ""
+            accumulated_tokens += max(1, len(delta_text) // 4) if delta_text else 0
 
-        async for raw_chunk in stream:
-            if not raw_chunk.choices:
-                continue
-            delta_obj = raw_chunk.choices[0].delta
-            delta_text = getattr(delta_obj, "content", "") or ""
-            finish = raw_chunk.choices[0].finish_reason
-            accumulated_tokens += max(1, len(delta_text) // 4)
+            finish_reason: Optional[str] = None
+            response_metadata = getattr(chunk, "response_metadata", {}) or {}
+            finish_reason = response_metadata.get("finish_reason")
 
-            yield StreamChunk(delta=delta_text, finish_reason=finish)
+            yield StreamChunk(
+                delta=delta_text,
+                finish_reason=finish_reason,
+            )
 
         approx_usage = TokenUsage(
             prompt_tokens=total_chars // 4,
@@ -704,6 +1059,28 @@ class OpenAIProvider(BaseAIProvider):
             total_tokens=total_chars // 4 + accumulated_tokens,
         )
         self._record_usage(approx_usage)
+
+
+# ---------------------------------------------------------------------------
+# OpenAI provider (backward-compatible alias)
+# ---------------------------------------------------------------------------
+
+class OpenAIProvider(LangChainProvider):
+    """Backward-compatible alias for :class:`LangChainProvider` with the
+    ``ModelProvider.OPENAI`` backend.
+
+    Existing code that instantiates ``OpenAIProvider`` directly will continue
+    to work without changes.
+
+    Args:
+        config: Provider configuration.  The ``provider`` field is forced to
+            ``ModelProvider.OPENAI``.
+    """
+
+    def __init__(self, config: ProviderConfig) -> None:
+        # Force provider type to OPENAI for backward compat
+        config.provider = ModelProvider.OPENAI
+        super().__init__(config)
 
 
 # ---------------------------------------------------------------------------
@@ -743,6 +1120,10 @@ class AnthropicProvider(BaseAIProvider):
 class AIProviderFactory:
     """Factory for creating AI provider instances from configuration.
 
+    By default all providers (except the Anthropic placeholder) are routed to
+    :class:`LangChainProvider`, which uses LangChain's ``BaseChatModel`` under
+    the hood.
+
     Usage::
 
         config = ProviderConfig(provider=ModelProvider.OPENAI, api_key="sk-...")
@@ -750,8 +1131,13 @@ class AIProviderFactory:
         response = await provider.generate("Write a SQL query to count users.")
     """
 
-    _registry: Dict[ModelProvider, type] = {
-        ModelProvider.OPENAI: OpenAIProvider,
+    _registry: Dict[ModelProvider, Type[BaseAIProvider]] = {
+        ModelProvider.OPENAI: LangChainProvider,
+        ModelProvider.AZURE_OPENAI: LangChainProvider,
+        ModelProvider.OLLAMA: LangChainProvider,
+        ModelProvider.LOCAL: LangChainProvider,
+        ModelProvider.TONGYI: LangChainProvider,
+        ModelProvider.DEEPSEEK: LangChainProvider,
         ModelProvider.ANTHROPIC: AnthropicProvider,
     }
 
@@ -777,7 +1163,7 @@ class AIProviderFactory:
         return provider_cls(config)
 
     @classmethod
-    def register(cls, provider: ModelProvider, provider_cls: type) -> None:
+    def register(cls, provider: ModelProvider, provider_cls: Type[BaseAIProvider]) -> None:
         """Register a custom provider class.
 
         Args:
