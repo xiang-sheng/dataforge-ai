@@ -138,10 +138,14 @@ DEMO_QUESTIONS = [
     {
         "question": "查2025年6月每个商品的购买数量和总金额，按金额降序排列",
         "note": "基础聚合查询，关联 orders + order_items，按月份筛选",
+        "materialize": True,  # 验证后固化为表
+        "table_name": "ads_monthly_product_sales",
+        "table_comment": "月度商品销售统计（购买数量+金额）",
     },
     {
         "question": "统计各省份VIP用户（vip_level>=3）在6月的消费总额，找出高价值区域",
         "note": "多表关联（users + orders + order_items）+ 条件筛选 + 分组聚合",
+        "materialize": False,
     },
 ]
 
@@ -267,16 +271,87 @@ def main():
             print(f"      [{entry['step']}] {entry['tool']}({args_str})")
         print()
 
+        # -----------------------------------------------------------
+        #  Step 5: 数据确认后固化建表（如果配置了 materialize）
+        # -----------------------------------------------------------
+        if demo.get("materialize") and result.sql:
+            tbl_name = demo["table_name"]
+            tbl_comment = demo.get("table_comment", "")
+
+            print_section(f"确认数据符合需求 → 固化为表 '{tbl_name}'", "-")
+            print("    用户看到查询结果后确认数据正确，决定固化为持久表。")
+            print("    这样后续直接查表即可，无需重复计算。")
+            print()
+
+            from src.warehouse.tools import create_table_from_query
+            mat_result = create_table_from_query.invoke({
+                "table_name": tbl_name,
+                "select_sql": result.sql,
+                "table_comment": tbl_comment,
+            })
+            print(f"    建表结果:")
+            for line in mat_result.splitlines():
+                print(f"      {line}")
+            print()
+
     # ------------------------------------------------------------------
-    #  Step 5: 汇总
+    #  Step 6: ETL 建表能力演示（DDL Agent）
+    # ------------------------------------------------------------------
+    print_section("Step 6: ETL 建表 — DDL Agent 从源表自动生成数仓 DDL")
+    print("    场景：已有 order_items 源表，需要为 DWS 层生成汇总建表 DDL")
+    print("    DDL Agent 会自主探索源表结构、读取规范、生成 DDL、验证")
+    print()
+
+    from src.warehouse.ddl_agent import DDLAgent
+    ddl_agent = DDLAgent(
+        llm=llm,
+        db=conn,
+        convention_file=convention_file,
+    )
+
+    print("    --- DDL Agent 工作过程 ---")
+    print()
+    ddl_result = ddl_agent.build(
+        source_table="order_items",
+        target_layer="DWS",
+        business_desc="商品销售日汇总表，按日期+商品维度聚合",
+    )
+
+    if ddl_result.success:
+        print()
+        print("    生成的 DDL:")
+        for line in (ddl_result.ddl or "").splitlines():
+            print(f"      {line}")
+        print()
+        print("    验证结果:")
+        for line in (ddl_result.verification or "无").splitlines():
+            print(f"      {line}")
+    else:
+        print(f"    DDL 生成失败: {ddl_result.error}")
+
+    print()
+    print(f"    工具调用 ({len(ddl_result.tool_calls_log)} 次):")
+    for entry in ddl_result.tool_calls_log:
+        args = entry["args"]
+        args_str = ", ".join(f"{k}={str(v)[:40]}" for k, v in args.items())
+        print(f"      [{entry['step']}] {entry['tool']}({args_str})")
+
+    # ------------------------------------------------------------------
+    #  汇总
     # ------------------------------------------------------------------
     print_section("汇总")
+    print("  [智能问数]")
     for i, r in enumerate(all_results, 1):
         status = "OK" if r.success else "FAIL"
         has_sql = "有SQL" if r.sql else "无SQL"
-        has_reasoning = "有思考" if r.reasoning else "无思考"
         calls = len(r.tool_calls_log)
-        print(f"    #{i} [{status}] {r.question[:40]}...  ({has_sql}, {has_reasoning}, {calls}次工具调用)")
+        mat = " → 已固化" if DEMO_QUESTIONS[i-1].get("materialize") else ""
+        print(f"    #{i} [{status}] {r.question[:40]}...  ({has_sql}, {calls}次调用{mat})")
+    print()
+    print("  [ETL 建表]")
+    status = "OK" if ddl_result.success else "FAIL"
+    calls = len(ddl_result.tool_calls_log)
+    print(f"    [{status}] order_items → DWS 层  ({calls}次调用)")
     print()
     print("  演示完成！")
     print()

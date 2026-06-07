@@ -116,13 +116,12 @@ class DDLAgent:
     def __init__(
         self,
         llm: Any,
-        source_db: str,
-        target_db: str = ":memory:",
+        db: Any,
         convention_file: Optional[str] = None,
         system_prompt: str = SYSTEM_PROMPT,
     ):
         # 初始化工具上下文（DB 连接 + 规范路径）
-        init_tool_context(source_db, target_db, convention_file)
+        init_tool_context(db, convention_file)
 
         # 将工具绑定到 LLM（让模型知道有哪些工具可调用）
         self.tools = ALL_TOOLS
