@@ -1,22 +1,18 @@
 """
-DataForge AI - LangChain Tools for Database Introspection & DDL Verification
+DataForge AI - LangChain Tools for Data Analysis & Table Building
 
-These tools are registered with the LLM agent via LangChain's tool-calling
-protocol. The model decides autonomously which tools to invoke, in what order,
-to inspect source schemas, read conventions, and verify generated DDL.
+These tools let the AI agent:
+  - Explore database schemas (list/describe/sample tables)
+  - Execute analytical SQL queries
+  - Materialize query results into persistent tables
+  - Read convention files when building permanent tables
 
-Tools:
-  - list_source_tables:   List all tables in the source database
-  - describe_source_table: Get column details of a source table
-  - get_sample_data:      Peek at sample rows from a table
-  - read_convention:      Read the table-creation convention file
-  - ddl_verify:           Verify DDL by executing in DuckDB sandbox
-  - list_target_tables:   List tables already created in the target DB
-  - query_target:         Run a SELECT on target tables
+Single-database design: all tools operate on one DuckDB connection.
 """
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Optional
 
@@ -25,64 +21,43 @@ from langchain_core.tools import tool
 
 
 # ---------------------------------------------------------------------------
-# Module-level DB handles (set once by init_tool_context)
+# Module-level DB handle
 # ---------------------------------------------------------------------------
-_source_conn: Optional[duckdb.DuckDBPyConnection] = None
-_target_conn: Optional[duckdb.DuckDBPyConnection] = None
+_conn: Optional[duckdb.DuckDBPyConnection] = None
 _convention_path: Optional[str] = None
 
 
 def init_tool_context(
-    source_db: str | duckdb.DuckDBPyConnection,
-    target_db: str | duckdb.DuckDBPyConnection = ":memory:",
+    db: str | duckdb.DuckDBPyConnection,
     convention_file: Optional[str] = None,
 ) -> None:
-    """Bind DuckDB connections and convention path for all tools.
+    """Bind a DuckDB connection for all tools. Call once before agent runs."""
+    global _conn, _convention_path
 
-    Call this once before creating the agent.  Accepts either a file path
-    (str) or an already-opened DuckDB connection object.
-    """
-    global _source_conn, _target_conn, _convention_path
-
-    if isinstance(source_db, str):
-        _source_conn = duckdb.connect(source_db, read_only=True)
+    if isinstance(db, str):
+        _conn = duckdb.connect(db)
     else:
-        _source_conn = source_db
-
-    if isinstance(target_db, str):
-        _target_conn = duckdb.connect(target_db)
-    else:
-        _target_conn = target_db
+        _conn = db
 
     _convention_path = convention_file
 
 
-def get_source_conn() -> duckdb.DuckDBPyConnection:
-    if _source_conn is None:
-        raise RuntimeError("init_tool_context() not called — source DB not connected")
-    return _source_conn
-
-
-def get_target_conn() -> duckdb.DuckDBPyConnection:
-    if _target_conn is None:
-        raise RuntimeError("init_tool_context() not called — target DB not connected")
-    return _target_conn
+def get_conn() -> duckdb.DuckDBPyConnection:
+    if _conn is None:
+        raise RuntimeError("init_tool_context() not called")
+    return _conn
 
 
 # ===================================================================
-#  Tool definitions (decorated with @tool for LangChain registration)
+#  Schema exploration tools
 # ===================================================================
 
 
 @tool
-def list_source_tables() -> str:
-    """列出源数据库中的所有表名。
-
-    返回每张表的表名、表类型（BASE TABLE / VIEW）和行数。
-    这是了解源库全貌的第一步。
-    """
+def list_tables() -> str:
+    """列出数据库中所有表名、表类型和行数。"""
     try:
-        rows = get_source_conn().execute("""
+        rows = get_conn().execute("""
             SELECT
                 t.table_name,
                 t.table_type,
@@ -96,7 +71,7 @@ def list_source_tables() -> str:
         """).fetchall()
 
         if not rows:
-            return "源数据库中没有任何表。"
+            return "数据库中没有任何表。"
 
         lines = [f"共 {len(rows)} 张表：\n"]
         for name, ttype, cnt in rows:
@@ -108,17 +83,14 @@ def list_source_tables() -> str:
 
 
 @tool
-def describe_source_table(table_name: str) -> str:
-    """获取指定源表的完整结构信息。
-
-    返回每个字段的：序号、字段名、数据类型、是否可空、默认值、注释。
-    用于深入了解一张表的 schema 设计。
+def describe_table(table_name: str) -> str:
+    """获取指定表的完整字段信息（字段名、类型、可空、默认值、注释）。
 
     Args:
         table_name: 要查看的表名
     """
     try:
-        cols = get_source_conn().execute("""
+        cols = get_conn().execute("""
             SELECT
                 ordinal_position,
                 column_name,
@@ -131,18 +103,17 @@ def describe_source_table(table_name: str) -> str:
         """, [table_name]).fetchall()
 
         if not cols:
-            return f"未找到表 '{table_name}'，请确认表名是否正确。"
+            return f"未找到表 '{table_name}'。"
 
-        lines = [f"表 '{table_name}' 的结构（{len(cols)} 个字段）：\n"]
-        lines.append(f"{'序号':<4}  {'字段名':<25} {'数据类型':<20} {'可空':<5} {'默认值'}")
-        lines.append("-" * 80)
+        lines = [f"表 '{table_name}' ({len(cols)} 个字段)：\n"]
+        lines.append(f"{'#':<3}  {'字段名':<22} {'类型':<18} {'可空':<4} {'默认值'}")
+        lines.append("-" * 75)
         for pos, name, dtype, nullable, default in cols:
             d = default if default else "-"
-            lines.append(f"{pos:<4}  {name:<25} {dtype:<20} {nullable:<5} {d}")
+            lines.append(f"{pos:<3}  {name:<22} {dtype:<18} {nullable:<4} {d}")
 
-        # 追加行数
         try:
-            cnt = get_source_conn().execute(
+            cnt = get_conn().execute(
                 f'SELECT COUNT(*) FROM "{table_name}"'
             ).fetchone()[0]
             lines.append(f"\n总行数: {cnt}")
@@ -157,7 +128,7 @@ def describe_source_table(table_name: str) -> str:
 
 @tool
 def get_sample_data(table_name: str, limit: int = 5) -> str:
-    """查看源表的前 N 行样本数据，了解实际数据内容。
+    """查看表的前 N 行样本数据，了解实际数据内容和格式。
 
     Args:
         table_name: 表名
@@ -165,36 +136,178 @@ def get_sample_data(table_name: str, limit: int = 5) -> str:
     """
     limit = min(max(1, limit), 20)
     try:
-        rows = get_source_conn().execute(
+        rows = get_conn().execute(
             f'SELECT * FROM "{table_name}" LIMIT {limit}'
         ).fetchall()
 
-        col_names = [
-            desc[0] for desc in get_source_conn().description
-        ]
+        col_names = [desc[0] for desc in get_conn().description]
 
         if not rows:
             return f"表 '{table_name}' 为空。"
 
-        lines = [f"表 '{table_name}' 样本数据（前 {len(rows)} 行）：\n"]
-        lines.append("  ".join(f"{c:<18}" for c in col_names))
-        lines.append("-" * (20 * len(col_names)))
+        lines = [f"表 '{table_name}' 样本（前 {len(rows)} 行）：\n"]
+        lines.append("  ".join(f"{c:<20}" for c in col_names))
+        lines.append("-" * (22 * len(col_names)))
         for row in rows:
-            lines.append("  ".join(f"{str(v):<18}" for v in row))
+            lines.append("  ".join(f"{str(v):<20}" for v in row))
         return "\n".join(lines)
 
     except Exception as e:
         return f"错误: {e}"
 
 
+# ===================================================================
+#  Query execution tools
+# ===================================================================
+
+
+@tool
+def execute_query(sql: str) -> str:
+    """执行 SELECT 查询并返回结果。用于验证 SQL 是否正确、查看分析结果。
+
+    只允许 SELECT 语句。最多返回 50 行。
+
+    Args:
+        sql: SELECT 查询语句
+    """
+    try:
+        upper = sql.strip().upper()
+        if not upper.startswith("SELECT") and not upper.startswith("WITH"):
+            return "仅允许 SELECT / WITH 查询。建表请用 execute_ddl 工具。"
+
+        result = get_conn().execute(sql)
+        rows = result.fetchall()
+        cols = [desc[0] for desc in result.description]
+
+        lines = [f"查询成功（{len(rows)} 行 x {len(cols)} 列）：\n"]
+        # 动态列宽
+        widths = [len(c) for c in cols]
+        display_rows = rows[:50]
+        for row in display_rows:
+            for i, v in enumerate(row):
+                widths[i] = max(widths[i], min(len(str(v)), 30))
+
+        header = "  ".join(f"{c:<{widths[i]}}" for i, c in enumerate(cols))
+        lines.append(header)
+        lines.append("-" * len(header))
+        for row in display_rows:
+            lines.append("  ".join(f"{str(v):<{widths[i]}}" for i, v in enumerate(row)))
+        if len(rows) > 50:
+            lines.append(f"... 省略 {len(rows) - 50} 行")
+
+        return "\n".join(lines)
+
+    except Exception as e:
+        return f"SQL 执行失败: {e}"
+
+
+@tool
+def execute_ddl(ddl: str) -> str:
+    """执行 DDL 语句（CREATE TABLE / DROP TABLE / CREATE VIEW 等）。
+
+    用于创建持久化的表或视图。多条语句用分号分隔。
+
+    Args:
+        ddl: DDL 语句
+    """
+    try:
+        conn = get_conn()
+        stmts = [s.strip() for s in ddl.split(";") if s.strip()]
+        results = []
+
+        for i, stmt in enumerate(stmts, 1):
+            upper = stmt.upper()
+            if upper.startswith("--") or not upper:
+                continue
+
+            # DROP before CREATE to allow re-runs
+            if "CREATE TABLE" in upper:
+                m = re.search(
+                    r'CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["`]?(\w+)["`]?',
+                    stmt, re.IGNORECASE
+                )
+                if m:
+                    try:
+                        conn.execute(f'DROP TABLE IF EXISTS "{m.group(1)}" CASCADE')
+                    except Exception:
+                        pass
+
+            try:
+                conn.execute(stmt)
+                results.append(f"[{i}] OK")
+            except Exception as e:
+                results.append(f"[{i}] FAIL: {e}")
+
+        if not results:
+            return "没有可执行的语句。"
+
+        # Show current tables
+        tables = conn.execute("""
+            SELECT table_name FROM information_schema.tables
+            WHERE table_schema = 'main' ORDER BY table_name
+        """).fetchall()
+
+        summary = "\n".join(results)
+        tbl_list = ", ".join(t[0] for t in tables) if tables else "无"
+        return f"执行结果:\n{summary}\n\n当前所有表: {tbl_list}"
+
+    except Exception as e:
+        return f"错误: {e}"
+
+
+@tool
+def create_table_from_query(table_name: str, select_sql: str, table_comment: str = "") -> str:
+    """将查询结果固化为持久化表 (CREATE TABLE AS SELECT)。
+
+    用于将常用的分析查询结果保存为物理表，后续可直接查询，无需重复计算。
+
+    Args:
+        table_name: 新建的表名（snake_case）
+        select_sql: SELECT 查询语句
+        table_comment: 表的中文说明
+    """
+    try:
+        conn = get_conn()
+
+        # Drop if exists
+        conn.execute(f'DROP TABLE IF EXISTS "{table_name}" CASCADE')
+
+        # Create table from query
+        conn.execute(f'CREATE TABLE "{table_name}" AS {select_sql}')
+
+        # Add table comment
+        if table_comment:
+            conn.execute(f"COMMENT ON TABLE \"{table_name}\" IS '{table_comment}'")
+
+        # Get stats
+        cnt = conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()[0]
+        cols = conn.execute("""
+            SELECT column_name, data_type
+            FROM information_schema.columns
+            WHERE table_name = ? AND table_schema = 'main'
+            ORDER BY ordinal_position
+        """, [table_name]).fetchall()
+
+        lines = [f"表 '{table_name}' 创建成功！\n"]
+        lines.append(f"  行数: {cnt}")
+        lines.append(f"  字段: {len(cols)} 个")
+        if table_comment:
+            lines.append(f"  说明: {table_comment}")
+        lines.append(f"\n  字段列表:")
+        for name, dtype in cols:
+            lines.append(f"    - {name} ({dtype})")
+
+        return "\n".join(lines)
+
+    except Exception as e:
+        return f"建表失败: {e}"
+
+
 @tool
 def read_convention() -> str:
-    """读取建表规范文件（YAML / Markdown）。
+    """读取建表规范文件（命名规则、数据类型映射、分区策略等）。
 
-    规范文件定义了数仓建设的命名规则、数据类型映射、分区策略、
-    注释要求、质量约束等标准。生成 DDL 时必须遵守这些规范。
-
-    直接返回文件的完整文本内容。
+    当需要将查询结果固化为持久化表时，应读取规范以确保符合标准。
     """
     if not _convention_path:
         return "未配置建表规范文件。"
@@ -207,144 +320,19 @@ def read_convention() -> str:
         content = path.read_text(encoding="utf-8")
         return f"规范文件: {path.name}\n{'=' * 50}\n{content}"
     except Exception as e:
-        return f"读取规范文件失败: {e}"
-
-
-@tool
-def ddl_verify(ddl: str) -> str:
-    """在 DuckDB 沙箱中验证 DDL 语句。
-
-    将 CREATE TABLE 等 DDL 在目标 DuckDB 数据库中执行，
-    验证语法正确性并确认建表成功。可一次提交多条语句（用分号分隔）。
-
-    Args:
-        ddl: 要验证的 DDL 语句（支持多条，以分号分隔）
-    """
-    try:
-        conn = get_target_conn()
-        stmts = [s.strip() for s in ddl.split(";") if s.strip()]
-        results = []
-
-        for i, stmt in enumerate(stmts, 1):
-            upper = stmt.upper()
-
-            # 跳过纯注释或空语句
-            if upper.startswith("--") or not upper:
-                continue
-
-            # CREATE 语句：先 DROP 同名表防止重复执行时报错
-            if "CREATE TABLE" in upper:
-                try:
-                    tbl = _extract_table_name(stmt)
-                    if tbl:
-                        conn.execute(f'DROP TABLE IF EXISTS "{tbl}" CASCADE')
-                except Exception:
-                    pass
-
-            try:
-                conn.execute(stmt)
-                results.append(f"[{i}] OK")
-            except Exception as e:
-                results.append(f"[{i}] FAIL: {e}")
-
-        if not results:
-            return "没有可执行的语句。"
-
-        # 列出目标库中当前所有表
-        tables = conn.execute("""
-            SELECT table_name FROM information_schema.tables
-            WHERE table_schema = 'main' ORDER BY table_name
-        """).fetchall()
-
-        summary = "\n".join(results)
-        tbl_list = ", ".join(t[0] for t in tables) if tables else "无"
-        return f"验证结果:\n{summary}\n\n目标库当前表: {tbl_list}"
-
-    except Exception as e:
-        return f"错误: {e}"
-
-
-@tool
-def list_target_tables() -> str:
-    """列出目标 DuckDB 仓库库中已创建的所有表。
-
-    用于确认 DDL 执行后的建表结果。
-    """
-    try:
-        rows = get_target_conn().execute("""
-            SELECT
-                t.table_name,
-                t.table_type,
-                COALESCE(s.estimated_size, 0) AS row_count
-            FROM information_schema.tables t
-            LEFT JOIN duckdb_tables() s
-                ON s.table_name = t.table_name AND s.schema_name = 'main'
-            WHERE t.table_schema = 'main'
-            ORDER BY t.table_name
-        """).fetchall()
-
-        if not rows:
-            return "目标库中暂无表。"
-
-        lines = [f"目标库共 {len(rows)} 张表：\n"]
-        for name, ttype, cnt in rows:
-            lines.append(f"  - {name} ({ttype}, {cnt} 行)")
-        return "\n".join(lines)
-
-    except Exception as e:
-        return f"错误: {e}"
-
-
-@tool
-def query_target(sql: str) -> str:
-    """在目标 DuckDB 仓库库上执行 SELECT 查询，用于验证数据。
-
-    Args:
-        sql: SELECT 查询语句
-    """
-    try:
-        result = get_target_conn().execute(sql)
-        rows = result.fetchall()
-        cols = [desc[0] for desc in result.description]
-
-        lines = [f"查询结果（{len(rows)} 行 x {len(cols)} 列）：\n"]
-        lines.append("  ".join(f"{c:<18}" for c in cols))
-        lines.append("-" * (20 * len(cols)))
-        for row in rows[:20]:
-            lines.append("  ".join(f"{str(v):<18}" for v in row))
-        if len(rows) > 20:
-            lines.append(f"... 省略 {len(rows) - 20} 行")
-        return "\n".join(lines)
-
-    except Exception as e:
-        return f"错误: {e}"
+        return f"读取失败: {e}"
 
 
 # ===================================================================
-#  Helpers
-# ===================================================================
-
-
-def _extract_table_name(ddl: str) -> Optional[str]:
-    """从 CREATE TABLE 语句中提取表名。"""
-    import re
-    m = re.search(
-        r'CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["`]?(\w+)["`]?',
-        ddl, re.IGNORECASE
-    )
-    return m.group(1) if m else None
-
-
-# ===================================================================
-#  Tool list for agent registration
+#  Tool list
 # ===================================================================
 
 ALL_TOOLS = [
-    list_source_tables,
-    describe_source_table,
+    list_tables,
+    describe_table,
     get_sample_data,
+    execute_query,
+    execute_ddl,
+    create_table_from_query,
     read_convention,
-    ddl_verify,
-    list_target_tables,
-    query_target,
 ]
