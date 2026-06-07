@@ -343,6 +343,133 @@ class AppSettings(BaseSettings):
             return [origin.strip() for origin in v.split(",") if origin.strip()]
         return v
 
+    # ------------------------------------------------------------------ #
+    # Bridge to AI provider layer
+    # ------------------------------------------------------------------ #
+
+    def get_provider_config(self) -> "ProviderConfig":
+        """Construct a :class:`~src.ai.provider.ProviderConfig` from the
+        current application settings.
+
+        Maps :attr:`llm_provider` to the correct :class:`ModelProvider` enum
+        value and selects the appropriate settings fields for each backend:
+
+        * ``openai`` / ``azure_openai`` -- uses ``openai_*`` fields
+        * ``ollama`` / ``local``        -- uses ``ollama_*`` fields
+        * ``tongyi`` / ``deepseek``     -- uses ``openai_*`` fields (shared
+          OpenAI-compatible interface, with provider-specific defaults)
+
+        Returns:
+            A fully populated ``ProviderConfig`` ready for
+            :class:`LLMFactory` / :class:`LangChainProvider`.
+        """
+        from src.ai.provider import ModelProvider, ProviderConfig
+
+        provider_map: dict[str, ModelProvider] = {
+            "openai": ModelProvider.OPENAI,
+            "azure_openai": ModelProvider.AZURE_OPENAI,
+            "ollama": ModelProvider.OLLAMA,
+            "local": ModelProvider.LOCAL,
+            "tongyi": ModelProvider.TONGYI,
+            "deepseek": ModelProvider.DEEPSEEK,
+        }
+
+        provider = provider_map.get(self.llm_provider.lower())
+        if provider is None:
+            raise ValueError(
+                f"Unknown llm_provider '{self.llm_provider}'. "
+                f"Supported values: {', '.join(provider_map)}"
+            )
+
+        # --- Ollama / local models ------------------------------------------
+        if provider in (ModelProvider.OLLAMA, ModelProvider.LOCAL):
+            return ProviderConfig(
+                provider=provider,
+                api_key=None,
+                base_url=self.ollama_base_url,
+                model=self.ollama_model,
+                temperature=self.ollama_temperature,
+                max_tokens=self.openai_max_tokens,
+                timeout=float(self.ollama_request_timeout),
+                max_retries=self.openai_max_retries,
+            )
+
+        # --- OpenAI ---------------------------------------------------------
+        if provider == ModelProvider.OPENAI:
+            return ProviderConfig(
+                provider=provider,
+                api_key=self.openai_api_key,
+                base_url=self.openai_api_base,
+                model=self.openai_model,
+                temperature=self.openai_temperature,
+                max_tokens=self.openai_max_tokens,
+                timeout=float(self.openai_request_timeout),
+                max_retries=self.openai_max_retries,
+            )
+
+        # --- Azure OpenAI ---------------------------------------------------
+        if provider == ModelProvider.AZURE_OPENAI:
+            return ProviderConfig(
+                provider=provider,
+                api_key=self.openai_api_key,
+                base_url=self.openai_api_base,
+                model=self.openai_model,
+                temperature=self.openai_temperature,
+                max_tokens=self.openai_max_tokens,
+                timeout=float(self.openai_request_timeout),
+                max_retries=self.openai_max_retries,
+            )
+
+        # --- Tongyi (通义千问) -----------------------------------------------
+        if provider == ModelProvider.TONGYI:
+            return ProviderConfig(
+                provider=provider,
+                api_key=self.openai_api_key,
+                base_url=self.openai_api_base,
+                model=self.openai_model,
+                temperature=self.openai_temperature,
+                max_tokens=self.openai_max_tokens,
+                timeout=float(self.openai_request_timeout),
+                max_retries=self.openai_max_retries,
+            )
+
+        # --- DeepSeek (OpenAI-compatible) ------------------------------------
+        if provider == ModelProvider.DEEPSEEK:
+            return ProviderConfig(
+                provider=provider,
+                api_key=self.openai_api_key,
+                base_url=self.openai_api_base or "https://api.deepseek.com",
+                model=self.openai_model,
+                temperature=self.openai_temperature,
+                max_tokens=self.openai_max_tokens,
+                timeout=float(self.openai_request_timeout),
+                max_retries=self.openai_max_retries,
+            )
+
+        # Unreachable, but keeps mypy happy
+        raise ValueError(f"Unhandled provider: {provider}")  # pragma: no cover
+
+    @classmethod
+    def get_ai_provider(cls) -> "LangChainProvider":
+        """Convenience class method that creates a fully initialised
+        :class:`~src.ai.provider.LangChainProvider` from the current
+        application settings.
+
+        Equivalent to::
+
+            settings = get_settings()
+            config   = settings.get_provider_config()
+            provider = LangChainProvider(config)
+
+        Returns:
+            A ready-to-use ``LangChainProvider`` instance.
+        """
+        from src.ai.provider import LangChainProvider
+
+        settings = get_settings()
+        config = settings.get_provider_config()
+        return LangChainProvider(config)
+
 
 @lru_cache
 def get_settings() -> AppSettings:

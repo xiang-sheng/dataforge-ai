@@ -364,6 +364,10 @@ class DDLPipelineConfig(BaseModel):
         le=10_000,
         description="Number of synthetic sample rows to generate for DuckDB verification.",
     )
+    enable_ai: bool = Field(
+        default=False,
+        description="Whether to run LLM-based AI enhancement after DDL generation.",
+    )
 
 
 # ====================================================================== #
@@ -392,6 +396,10 @@ class GeneratedTable(BaseModel):
     column_mappings: List[Dict[str, Any]] = Field(
         default_factory=list,
         description="List of source_col -> target_col mapping dictionaries.",
+    )
+    ai_enhance_result: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="LLM-based AI enhancement result (suggestions, warnings), or ``None``.",
     )
 
 
@@ -632,7 +640,7 @@ class DDLAutoBuilder:
 
         for schema in source_schemas:
             try:
-                generated = self._process_single_table(schema)
+                generated = await self._process_single_table(schema)
                 tables.append(generated)
                 succeeded += 1
             except Exception as exc:
@@ -698,7 +706,7 @@ class DDLAutoBuilder:
         """
         if _HAS_CONVENTION_LOADER and ConventionLoader is not None:
             loader = ConventionLoader()
-            self._convention = loader.load(path)
+            self._convention = loader.load_auto(path)
             logger.info("Loaded convention from '%s'.", path)
         else:
             logger.warning(
@@ -746,14 +754,15 @@ class DDLAutoBuilder:
         # 2. Convention file (if available and has a naming function)
         if (
             self._convention is not None
-            and hasattr(self._convention, "generate_table_name")
+            and hasattr(self._convention, "naming")
         ):
             try:
-                name = self._convention.generate_table_name(source_table, layer_upper)
-                logger.debug(
-                    "Convention naming: %s + %s -> %s", source_table, layer_upper, name
-                )
-                return name
+                name = self._apply_naming_convention(source_table, layer_upper)
+                if name:
+                    logger.debug(
+                        "Convention naming: %s + %s -> %s", source_table, layer_upper, name
+                    )
+                    return name
             except Exception:
                 logger.debug("Convention naming failed; falling back to defaults.")
 
@@ -766,6 +775,59 @@ class DDLAutoBuilder:
         target = f"{prefix}_{domain}_{body}{suffix}"
         logger.debug("Built-in naming: %s + %s -> %s", source_table, layer_upper, target)
         return target
+
+    def _apply_naming_convention(self, source_table: str, layer_upper: str) -> Optional[str]:
+        """Construct a target table name from the loaded convention's naming rules.
+
+        Reads the ``NamingConvention`` fields (``table_pattern``,
+        ``prefix_rules``, ``suffix_rules``, ``case_style``) stored on
+        ``self._convention.naming`` and assembles a table name.
+
+        Returns ``None`` when the convention has no usable naming data so
+        the caller can fall back to built-in defaults.
+        """
+        naming = getattr(self._convention, "naming", None)
+        if naming is None:
+            return None
+
+        table_pattern: str = getattr(naming, "table_pattern", "") or ""
+        prefix_rules: Dict[str, str] = getattr(naming, "prefix_rules", {}) or {}
+        suffix_rules: Dict[str, str] = getattr(naming, "suffix_rules", {}) or {}
+        case_style: str = getattr(naming, "case_style", "snake_case") or "snake_case"
+
+        if not table_pattern:
+            return None
+
+        # Derive the parts used in the pattern
+        prefix = prefix_rules.get(layer_upper, layer_upper.lower() + "_")
+        domain = _infer_domain(source_table)
+        body = _snake_case(source_table)
+
+        # Infer a category for suffix lookup (heuristic: check table name keywords)
+        category = ""
+        lower_name = source_table.lower()
+        for key in suffix_rules:
+            if key in lower_name:
+                category = key
+                break
+        suffix = suffix_rules.get(category, "")
+
+        # Apply the pattern template
+        name = table_pattern.format(
+            layer=layer_upper.lower(),
+            domain=domain,
+            description=body,
+            prefix=prefix,
+            suffix=suffix,
+        )
+
+        # Apply case style
+        name = _snake_case(name) if case_style == "snake_case" else name
+
+        logger.debug(
+            "Convention naming applied: pattern=%s -> %s", table_pattern, name
+        )
+        return name
 
     # ------------------------------------------------------------------ #
     # Step 3: Column mapping
@@ -1302,32 +1364,36 @@ class DDLAutoBuilder:
 
         try:
             sandbox = DuckDBSandbox()
-            # 1. Create source table DDL for DuckDB
-            source_ddl = self._build_source_ddl_duckdb(source_schema)
-            sandbox.execute(source_ddl)
+            with sandbox:
+                # 1. Create source table DDL for DuckDB
+                source_ddl = self._build_source_ddl_duckdb(source_schema)
+                sandbox.verify_ddl(source_ddl)
 
-            # 2. Insert sample data
-            sample_inserts = self._generate_sample_inserts(
-                source_schema, self.config.sample_rows_for_verify
-            )
-            for insert_sql in sample_inserts:
-                sandbox.execute(insert_sql)
+                # 2. Insert sample data
+                sample_inserts = self._generate_sample_inserts(
+                    source_schema, self.config.sample_rows_for_verify
+                )
+                for insert_sql in sample_inserts:
+                    sandbox.verify_computation_sql(insert_sql)
 
-            # 3. Execute target DDL (adapted for DuckDB)
-            adapted_ddl = _adapt_ddl_for_duckdb(ddl)
-            sandbox.execute(adapted_ddl)
+                # 3. Execute target DDL (adapted for DuckDB)
+                adapted_ddl = _adapt_ddl_for_duckdb(ddl)
+                sandbox.verify_ddl(adapted_ddl)
 
-            # 4. Execute computation SQL (adapted for DuckDB)
-            adapted_sql = self._adapt_computation_sql_for_duckdb(computation_sql)
-            sandbox.execute(adapted_sql)
+                # 4. Execute computation SQL (adapted for DuckDB)
+                adapted_sql = self._adapt_computation_sql_for_duckdb(computation_sql)
+                sandbox.verify_computation_sql(adapted_sql)
 
-            # 5. Check results
-            target_table = self._extract_table_name_from_ddl(ddl)
-            if target_table:
-                rows = sandbox.execute(f"SELECT COUNT(*) AS cnt FROM {target_table}")
-                count = rows[0]["cnt"] if rows else 0
-                result["rows_produced"] = count
-                result["success"] = count > 0
+                # 5. Check results
+                target_table = self._extract_table_name_from_ddl(ddl)
+                if target_table:
+                    query_result = sandbox.execute_and_preview(
+                        f"SELECT COUNT(*) AS cnt FROM {target_table}"
+                    )
+                    rows = query_result.rows if query_result.rows else []
+                    count = rows[0]["cnt"] if rows else 0
+                    result["rows_produced"] = count
+                    result["success"] = count > 0
 
         except Exception as exc:
             result["errors"].append(str(exc))
@@ -1401,7 +1467,11 @@ class DDLAutoBuilder:
             )
 
             # Attempt to use the AI provider
-            provider_config = ProviderConfig(temperature=0.2, max_tokens=4096)
+            try:
+                from src.config.settings import get_settings
+                provider_config = get_settings().get_provider_config()
+            except Exception:
+                provider_config = ProviderConfig(temperature=0.2, max_tokens=4096)
             provider = AIProviderFactory.create(provider_config)
             ai_response = await provider.generate(
                 prompt_text, system=system_prompt
@@ -1424,7 +1494,7 @@ class DDLAutoBuilder:
     # Internal: process a single table through the full pipeline
     # ------------------------------------------------------------------ #
 
-    def _process_single_table(self, schema: TableSchema) -> GeneratedTable:
+    async def _process_single_table(self, schema: TableSchema) -> GeneratedTable:
         """Run the full generation pipeline for one source table.
 
         Returns a :class:`GeneratedTable` with DDL, computation SQL, and
@@ -1476,7 +1546,27 @@ class DDLAutoBuilder:
         if self.config.local_verify and _HAS_DUCKDB_SANDBOX and computation_sql:
             verify_result = self.verify_in_sandbox(ddl, computation_sql, schema)
 
-        # 7. Serialize column mappings for the result
+        # 7. AI enhancement (optional)
+        ai_result: Optional[Dict[str, Any]] = None
+        if self.config.enable_ai and _HAS_AI_PROVIDER:
+            try:
+                enhance = await self.ai_enhance(schema, ddl, computation_sql or "")
+                ai_result = {
+                    "suggestions": enhance.suggestions,
+                    "warnings": enhance.warnings,
+                    "enhanced_ddl": enhance.enhanced_ddl,
+                    "enhanced_sql": enhance.enhanced_sql,
+                }
+                # Use AI-improved DDL/SQL if provided
+                if enhance.enhanced_ddl:
+                    ddl = enhance.enhanced_ddl
+                if enhance.enhanced_sql:
+                    computation_sql = enhance.enhanced_sql
+            except Exception as exc:
+                logger.warning("AI enhancement failed for '%s': %s", source_name, exc)
+                ai_result = {"error": str(exc)}
+
+        # 8. Serialize column mappings for the result
         mapping_dicts = [cm.model_dump() for cm in column_mappings]
 
         return GeneratedTable(
@@ -1488,6 +1578,7 @@ class DDLAutoBuilder:
             convention_violations=violations,
             verify_result=verify_result,
             column_mappings=mapping_dicts,
+            ai_enhance_result=ai_result,
         )
 
     # ------------------------------------------------------------------ #
