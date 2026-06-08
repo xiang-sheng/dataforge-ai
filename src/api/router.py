@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from src.api.routes import connection, ddl_builder, etl, lineage, modeling, sql, warehouse
+from src.api.routes import agent, connection, ddl_builder, etl, lineage, modeling, sql, warehouse
 
 api_router = APIRouter(
     prefix="/api/v1",
@@ -59,4 +59,10 @@ api_router.include_router(
     etl.router,
     prefix="/etl",
     tags=["ETL"],
+)
+
+api_router.include_router(
+    agent.router,
+    prefix="/agent",
+    tags=["AI Agent"],
 )

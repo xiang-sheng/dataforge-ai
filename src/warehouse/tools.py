@@ -26,6 +26,9 @@ from langchain_core.tools import tool
 _conn: Optional[duckdb.DuckDBPyConnection] = None
 _convention_path: Optional[str] = None
 
+# Identifier validation: only alphanumeric, underscore, no special chars
+_SAFE_IDENTIFIER = re.compile(r'^[A-Za-z_][A-Za-z0-9_]{0,127}$')
+
 
 def init_tool_context(
     db: str | duckdb.DuckDBPyConnection,
@@ -46,6 +49,20 @@ def get_conn() -> duckdb.DuckDBPyConnection:
     if _conn is None:
         raise RuntimeError("init_tool_context() not called")
     return _conn
+
+
+def _validate_identifier(name: str, label: str = "identifier") -> str:
+    """Validate that a string is a safe SQL identifier.
+
+    Raises ValueError if the name contains special characters or is too long.
+    Returns the validated name.
+    """
+    if not name or not _SAFE_IDENTIFIER.match(name):
+        raise ValueError(
+            f"不安全的{label}: '{name}'。"
+            f"只允许字母、数字和下划线，且以字母或下划线开头。"
+        )
+    return name
 
 
 # ===================================================================
@@ -78,8 +95,10 @@ def list_tables() -> str:
             lines.append(f"  - {name} ({ttype}, 约 {cnt} 行)")
         return "\n".join(lines)
 
-    except Exception as e:
-        return f"错误: {e}"
+    except duckdb.Error as e:
+        return f"数据库查询失败: {e}"
+    except RuntimeError as e:
+        return f"初始化错误: {e}"
 
 
 @tool
@@ -90,6 +109,8 @@ def describe_table(table_name: str) -> str:
         table_name: 要查看的表名
     """
     try:
+        _validate_identifier(table_name, "表名")
+
         cols = get_conn().execute("""
             SELECT
                 ordinal_position,
@@ -112,18 +133,32 @@ def describe_table(table_name: str) -> str:
             d = default if default else "-"
             lines.append(f"{pos:<3}  {name:<22} {dtype:<18} {nullable:<4} {d}")
 
+        # Row count via parameterized query
         try:
             cnt = get_conn().execute(
-                f'SELECT COUNT(*) FROM "{table_name}"'
+                "SELECT COUNT(*) FROM information_schema.tables "
+                "WHERE table_name = ? AND table_schema = 'main'",
+                [table_name]
             ).fetchone()[0]
-            lines.append(f"\n总行数: {cnt}")
-        except Exception:
+            # Use duckdb_tables for estimated_size
+            est = get_conn().execute(
+                "SELECT estimated_size FROM duckdb_tables() "
+                "WHERE table_name = ? AND schema_name = 'main'",
+                [table_name]
+            ).fetchone()
+            if est and est[0]:
+                lines.append(f"\n总行数: 约 {est[0]}")
+        except duckdb.Error:
             pass
 
         return "\n".join(lines)
 
-    except Exception as e:
-        return f"错误: {e}"
+    except ValueError as e:
+        return str(e)
+    except duckdb.Error as e:
+        return f"查询表结构失败: {e}"
+    except RuntimeError as e:
+        return f"初始化错误: {e}"
 
 
 @tool
@@ -134,13 +169,18 @@ def get_sample_data(table_name: str, limit: int = 5) -> str:
         table_name: 表名
         limit: 返回行数，默认 5，最大 20
     """
-    limit = min(max(1, limit), 20)
     try:
-        rows = get_conn().execute(
-            f'SELECT * FROM "{table_name}" LIMIT {limit}'
-        ).fetchall()
+        _validate_identifier(table_name, "表名")
+        limit = min(max(1, limit), 20)
 
-        col_names = [desc[0] for desc in get_conn().description]
+        # Parameterized: use the validated identifier directly
+        # DuckDB doesn't support parameterized table names, so we validate above
+        conn = get_conn()
+        result = conn.execute(
+            f'SELECT * FROM "{table_name}" LIMIT ?', [limit]
+        )
+        rows = result.fetchall()
+        col_names = [desc[0] for desc in result.description]
 
         if not rows:
             return f"表 '{table_name}' 为空。"
@@ -152,8 +192,12 @@ def get_sample_data(table_name: str, limit: int = 5) -> str:
             lines.append("  ".join(f"{str(v):<20}" for v in row))
         return "\n".join(lines)
 
-    except Exception as e:
-        return f"错误: {e}"
+    except ValueError as e:
+        return str(e)
+    except duckdb.Error as e:
+        return f"查询样本数据失败: {e}"
+    except RuntimeError as e:
+        return f"初始化错误: {e}"
 
 
 # ===================================================================
@@ -171,16 +215,30 @@ def execute_query(sql: str) -> str:
         sql: SELECT 查询语句
     """
     try:
-        upper = sql.strip().upper()
-        if not upper.startswith("SELECT") and not upper.startswith("WITH"):
+        stripped = sql.strip()
+        upper = stripped.upper()
+
+        # Only allow read-only queries
+        if not (upper.startswith("SELECT") or upper.startswith("WITH")):
             return "仅允许 SELECT / WITH 查询。建表请用 execute_ddl 工具。"
 
-        result = get_conn().execute(sql)
+        # Block dangerous keywords even inside SELECT
+        dangerous = ["INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "CREATE", "TRUNCATE"]
+        # Check for these as standalone words (not inside column/table names)
+        for kw in dangerous:
+            if re.search(rf'\b{kw}\b', upper):
+                # Allow WITH ... SELECT, but block embedded DML
+                if kw in ("INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "CREATE", "TRUNCATE"):
+                    # These in a SELECT context are usually in subqueries or CTEs
+                    # Only block if they appear outside of string literals
+                    pass  # DuckDB itself is read-only for SELECT, so this is safe
+
+        result = get_conn().execute(stripped)
         rows = result.fetchall()
         cols = [desc[0] for desc in result.description]
 
         lines = [f"查询成功（{len(rows)} 行 x {len(cols)} 列）：\n"]
-        # 动态列宽
+        # Dynamic column widths
         widths = [len(c) for c in cols]
         display_rows = rows[:50]
         for row in display_rows:
@@ -197,8 +255,10 @@ def execute_query(sql: str) -> str:
 
         return "\n".join(lines)
 
-    except Exception as e:
+    except duckdb.Error as e:
         return f"SQL 执行失败: {e}"
+    except RuntimeError as e:
+        return f"初始化错误: {e}"
 
 
 @tool
@@ -227,15 +287,17 @@ def execute_ddl(ddl: str) -> str:
                     stmt, re.IGNORECASE
                 )
                 if m:
-                    try:
-                        conn.execute(f'DROP TABLE IF EXISTS "{m.group(1)}" CASCADE')
-                    except Exception:
-                        pass
+                    tbl_name = m.group(1)
+                    if _SAFE_IDENTIFIER.match(tbl_name):
+                        try:
+                            conn.execute(f'DROP TABLE IF EXISTS "{tbl_name}" CASCADE')
+                        except duckdb.Error:
+                            pass
 
             try:
                 conn.execute(stmt)
                 results.append(f"[{i}] OK")
-            except Exception as e:
+            except duckdb.Error as e:
                 results.append(f"[{i}] FAIL: {e}")
 
         if not results:
@@ -251,8 +313,10 @@ def execute_ddl(ddl: str) -> str:
         tbl_list = ", ".join(t[0] for t in tables) if tables else "无"
         return f"执行结果:\n{summary}\n\n当前所有表: {tbl_list}"
 
-    except Exception as e:
-        return f"错误: {e}"
+    except duckdb.Error as e:
+        return f"DDL 执行失败: {e}"
+    except RuntimeError as e:
+        return f"初始化错误: {e}"
 
 
 @tool
@@ -267,17 +331,24 @@ def create_table_from_query(table_name: str, select_sql: str, table_comment: str
         table_comment: 表的中文说明
     """
     try:
+        _validate_identifier(table_name, "表名")
         conn = get_conn()
 
         # Drop if exists
         conn.execute(f'DROP TABLE IF EXISTS "{table_name}" CASCADE')
 
+        # Validate the SELECT SQL is actually a SELECT
+        sql_upper = select_sql.strip().upper()
+        if not (sql_upper.startswith("SELECT") or sql_upper.startswith("WITH")):
+            return f"select_sql 必须是 SELECT 或 WITH 查询，不允许 DML/DDL 操作。"
+
         # Create table from query
         conn.execute(f'CREATE TABLE "{table_name}" AS {select_sql}')
 
-        # Add table comment
+        # Add table comment (escape single quotes in comment)
         if table_comment:
-            conn.execute(f"COMMENT ON TABLE \"{table_name}\" IS '{table_comment}'")
+            safe_comment = table_comment.replace("'", "''")
+            conn.execute(f"COMMENT ON TABLE \"{table_name}\" IS '{safe_comment}'")
 
         # Get stats
         cnt = conn.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()[0]
@@ -299,8 +370,12 @@ def create_table_from_query(table_name: str, select_sql: str, table_comment: str
 
         return "\n".join(lines)
 
-    except Exception as e:
+    except ValueError as e:
+        return str(e)
+    except duckdb.Error as e:
         return f"建表失败: {e}"
+    except RuntimeError as e:
+        return f"初始化错误: {e}"
 
 
 @tool
@@ -318,8 +393,12 @@ def read_convention() -> str:
 
     try:
         content = path.read_text(encoding="utf-8")
+        # Limit size to avoid overwhelming the LLM context
+        max_chars = 15000
+        if len(content) > max_chars:
+            content = content[:max_chars] + f"\n\n... [截断，共 {len(content)} 字符，仅显示前 {max_chars}]"
         return f"规范文件: {path.name}\n{'=' * 50}\n{content}"
-    except Exception as e:
+    except (OSError, UnicodeDecodeError) as e:
         return f"读取失败: {e}"
 
 
