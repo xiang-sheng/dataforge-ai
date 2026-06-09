@@ -1,9 +1,8 @@
-"""API routes for AI Agents (SQLAgent + DDLAgent)."""
+"""API routes for AI Agents — unified chat + direct endpoints."""
 
 from __future__ import annotations
 
 import os
-import tempfile
 from typing import Optional
 
 import duckdb
@@ -16,6 +15,28 @@ router = APIRouter()
 # ---------------------------------------------------------------------------
 #  Request / Response models
 # ---------------------------------------------------------------------------
+
+class ChatRequest(BaseModel):
+    message: str = Field(..., description="自然语言输入（自动路由到对应 Agent）", examples=["查6月各商品购买数量和金额"])
+    target_agent: Optional[str] = Field(None, description="指定 Agent 名称（跳过意图分类）")
+    db_path: Optional[str] = Field(None, description="DuckDB 文件路径")
+    convention_file: Optional[str] = Field(None, description="建表规范文件路径")
+    context: Optional[dict] = Field(None, description="额外上下文参数")
+
+
+class ChatResponse(BaseModel):
+    success: bool
+    agent_name: str
+    content: str
+    metadata: dict = Field(default_factory=dict)
+    error: Optional[str] = None
+
+
+class AgentInfo(BaseModel):
+    name: str
+    description: str
+    keywords: str
+
 
 class AnalyzeRequest(BaseModel):
     question: str = Field(..., description="自然语言数据需求", examples=["查2025年6月各商品购买数量和金额"])
@@ -63,7 +84,6 @@ def _create_ll():
         from src.ai.provider import LLMFactory
         return LLMFactory.create_chat_model(provider_config)
     except ImportError:
-        # Fallback: try Ollama directly
         from langchain_community.chat_models import ChatOllama
         return ChatOllama(
             model=os.environ.get("OLLAMA_MODEL", "qwen2.5:14b"),
@@ -73,8 +93,71 @@ def _create_ll():
         )
 
 
+def _create_orchestrator(db_path: str = ":memory:", convention_file: Optional[str] = None):
+    """Create a fully configured AgentOrchestrator with all agents registered."""
+    from src.agents import AgentRegistry, AgentOrchestrator, SQLAgentWrapper, DDLAgentWrapper
+
+    llm = _create_ll()
+    registry = AgentRegistry()
+
+    sql_agent = SQLAgentWrapper(llm=llm, db=db_path, convention_file=convention_file)
+    ddl_agent = DDLAgentWrapper(llm=llm, db=db_path, convention_file=convention_file)
+
+    registry.register(sql_agent)
+    registry.register(ddl_agent)
+
+    return AgentOrchestrator(registry, llm)
+
+
 # ---------------------------------------------------------------------------
-#  Endpoints
+#  Unified chat endpoint (routes via intent classification)
+# ---------------------------------------------------------------------------
+
+@router.post("/chat", response_model=ChatResponse)
+async def unified_chat(req: ChatRequest):
+    """统一入口：自动识别意图并路由到对应 Agent。
+
+    支持智能问数（自然语言查询）和智能建表（DDL 生成），
+    也可通过 target_agent 参数直接指定 Agent。
+    """
+    try:
+        db = req.db_path or ":memory:"
+        orch = _create_orchestrator(db, req.convention_file)
+
+        ctx = req.context or {}
+        if req.convention_file:
+            ctx["convention_file"] = req.convention_file
+
+        result = orch.chat(
+            message=req.message,
+            target_agent=req.target_agent,
+            context=ctx,
+        )
+
+        return ChatResponse(
+            success=result.success,
+            agent_name=result.agent_name,
+            content=result.content,
+            metadata=result.metadata,
+            error=result.error,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/agents", response_model=list[AgentInfo])
+async def list_agents():
+    """列出所有已注册的 Agent 及其描述。"""
+    try:
+        orch = _create_orchestrator()
+        agents = orch.list_agents()
+        return [AgentInfo(**a) for a in agents]
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ---------------------------------------------------------------------------
+#  Direct endpoints (bypass intent routing)
 # ---------------------------------------------------------------------------
 
 @router.post("/analyze", response_model=AnalyzeResponse)

@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
 """
-DataForge AI - 智能数据分析演示
-==================================
+DataForge AI - 多 Agent 智能数据分析演示
+==========================================
 
 直接运行：  python demo.py
 
 演示场景：
-  用户在电商业务库中，用自然语言提出数据分析需求。
-  AI Agent 自主探索表结构 → 打印思考过程 → 生成 SQL → 执行验证 → 建议固化。
+  通过 AgentOrchestrator 统一入口，用户用自然语言交互。
+  系统自动识别意图 → 路由到对应 Agent（智能问数 / 智能建表）。
 
-示例提问：
-  1. "查2025年6月每个商品的购买数量和总金额，按金额降序"
-  2. "统计各省份VIP用户（vip_level>=3）的月均消费，找出高价值区域"
+能力展示：
+  1. 智能问数：自然语言 → 思考过程 → SQL → 执行验证 → 建议固化
+  2. 智能建表：源表结构 → 读取规范 → 生成数仓 DDL → 验证
+  3. 意图路由：同一入口自动分类到不同 Agent
 
 依赖：  pip install langchain langchain-community langchain-core duckdb pyyaml
 前置：  ollama serve && ollama pull qwen2.5:14b
@@ -131,21 +132,24 @@ def create_demo_db() -> duckdb.DuckDBPyConnection:
 
 
 # ===================================================================
-#  演示场景
+#  演示对话（混合意图：问数 + 建表）
 # ===================================================================
 
-DEMO_QUESTIONS = [
+DEMO_CONVERSATIONS = [
     {
-        "question": "查2025年6月每个商品的购买数量和总金额，按金额降序排列",
-        "note": "基础聚合查询，关联 orders + order_items，按月份筛选",
-        "materialize": True,  # 验证后固化为表
-        "table_name": "ads_monthly_product_sales",
-        "table_comment": "月度商品销售统计（购买数量+金额）",
+        "message": "查2025年6月每个商品的购买数量和总金额，按金额降序排列",
+        "note": "意图：智能问数 → 自动路由到 sql_query Agent",
+        "expect_agent": "sql_query",
     },
     {
-        "question": "统计各省份VIP用户（vip_level>=3）在6月的消费总额，找出高价值区域",
-        "note": "多表关联（users + orders + order_items）+ 条件筛选 + 分组聚合",
-        "materialize": False,
+        "message": "统计各省份VIP用户（vip_level>=3）在6月的消费总额",
+        "note": "意图：智能问数 → 多表关联分析",
+        "expect_agent": "sql_query",
+    },
+    {
+        "message": "请为 order_items 源表生成 DWS 层的目标表 DDL，按日期和商品维度汇总",
+        "note": "意图：智能建表 → 自动路由到 ddl_build Agent",
+        "expect_agent": "ddl_build",
     },
 ]
 
@@ -161,7 +165,7 @@ def print_section(title: str, char: str = "="):
 def main():
     print()
     print("  " + "=" * 60)
-    print("  DataForge AI - 智能数据分析助手 演示")
+    print("  DataForge AI - 多 Agent 智能数据分析 演示")
     print("  " + "=" * 60)
 
     # ------------------------------------------------------------------
@@ -208,150 +212,122 @@ def main():
         sys.exit(1)
 
     # ------------------------------------------------------------------
-    #  Step 3: 创建 Agent
+    #  Step 3: 创建多 Agent 编排器
     # ------------------------------------------------------------------
-    print_section("Step 3: 创建 SQL 分析 Agent")
+    print_section("Step 3: 初始化多 Agent 编排器")
 
-    from src.warehouse.sql_agent import SQLAgent
+    from src.agents import (
+        AgentRegistry,
+        AgentOrchestrator,
+        SQLAgentWrapper,
+        DDLAgentWrapper,
+    )
 
     convention_file = str(PROJECT_ROOT / "conventions" / "default_convention.yaml")
     if not os.path.exists(convention_file):
         convention_file = None
 
-    agent = SQLAgent(
-        llm=llm,
-        db=conn,
-        convention_file=convention_file,
-    )
-    print(f"    已注册 {len(agent.tools)} 个工具:")
-    for t in agent.tools:
-        desc = t.description.split("\n")[0][:50]
-        print(f"      - {t.name}: {desc}")
+    registry = AgentRegistry()
+
+    sql_wrapper = SQLAgentWrapper(llm=llm, db=conn, convention_file=convention_file)
+    ddl_wrapper = DDLAgentWrapper(llm=llm, db=conn, convention_file=convention_file)
+
+    registry.register(sql_wrapper)
+    registry.register(ddl_wrapper)
+
+    orchestrator = AgentOrchestrator(registry, llm)
+
+    print("    已注册的 Agent:")
+    for info in orchestrator.list_agents():
+        print(f"      [{info['name']}] {info['description']}")
+        print(f"        关键词: {info['keywords']}")
 
     # ------------------------------------------------------------------
-    #  Step 4: 运行分析
+    #  Step 4: 通过统一入口交互（自动意图路由）
     # ------------------------------------------------------------------
-    all_results = []
+    results = []
 
-    for i, demo in enumerate(DEMO_QUESTIONS, 1):
-        q = demo["question"]
+    for i, demo in enumerate(DEMO_CONVERSATIONS, 1):
+        msg = demo["message"]
         note = demo["note"]
+        expected = demo["expect_agent"]
 
-        print_section(f"提问 #{i}: {q}")
-        print(f"    场景说明: {note}")
-        print()
-        print("    --- Agent 工作过程 ---")
-        print()
-
-        result = agent.analyze(q)
-        all_results.append(result)
-
-        print()
-        print("    --- Agent 最终回复 ---")
+        print_section(f"对话 #{i}", "-")
+        print(f"    用户: {msg}")
+        print(f"    说明: {note}")
+        print(f"    预期路由: {expected}")
         print()
 
-        if result.reasoning:
-            print("    【思考过程】")
-            for line in result.reasoning.splitlines():
-                stripped = line.strip()
-                if stripped:
-                    print(f"    {stripped}")
+        # Pass db connection as context
+        result = orchestrator.chat(
+            message=msg,
+            context={"db": conn, "convention_file": convention_file},
+        )
+
+        results.append((demo, result))
+
+        print(f"    → 路由到: {result.agent_name}")
+        print(f"    → 状态: {'成功' if result.success else '失败'}")
+        print()
+
+        # Print content (truncated for readability)
+        if result.content:
+            lines = result.content.splitlines()
+            print("    --- 回复内容 ---")
+            for line in lines[:30]:
+                print(f"    {line}")
+            if len(lines) > 30:
+                print(f"    ... 省略 {len(lines) - 30} 行")
             print()
 
-        if result.sql:
-            print("    生成的 SQL:")
-            for line in result.sql.splitlines():
-                print(f"      {line}")
+        if result.error:
+            print(f"    错误: {result.error}")
             print()
 
-        print(f"    工具调用 ({len(result.tool_calls_log)} 次):")
-        for entry in result.tool_calls_log:
-            args = entry["args"]
-            args_str = ", ".join(f"{k}={str(v)[:40]}" for k, v in args.items())
-            print(f"      [{entry['step']}] {entry['tool']}({args_str})")
+        # Show metadata
+        meta = result.metadata
+        if meta.get("tool_calls"):
+            print(f"    工具调用次数: {meta['tool_calls']}")
         print()
-
-        # -----------------------------------------------------------
-        #  Step 5: 数据确认后固化建表（如果配置了 materialize）
-        # -----------------------------------------------------------
-        if demo.get("materialize") and result.sql:
-            tbl_name = demo["table_name"]
-            tbl_comment = demo.get("table_comment", "")
-
-            print_section(f"确认数据符合需求 → 固化为表 '{tbl_name}'", "-")
-            print("    用户看到查询结果后确认数据正确，决定固化为持久表。")
-            print("    这样后续直接查表即可，无需重复计算。")
-            print()
-
-            from src.warehouse.tools import create_table_from_query
-            mat_result = create_table_from_query.invoke({
-                "table_name": tbl_name,
-                "select_sql": result.sql,
-                "table_comment": tbl_comment,
-            })
-            print(f"    建表结果:")
-            for line in mat_result.splitlines():
-                print(f"      {line}")
-            print()
 
     # ------------------------------------------------------------------
-    #  Step 6: ETL 建表能力演示（DDL Agent）
+    #  Step 5: 显式指定 Agent（跳过意图分类）
     # ------------------------------------------------------------------
-    print_section("Step 6: ETL 建表 — DDL Agent 从源表自动生成数仓 DDL")
-    print("    场景：已有 order_items 源表，需要为 DWS 层生成汇总建表 DDL")
-    print("    DDL Agent 会自主探索源表结构、读取规范、生成 DDL、验证")
+    print_section("Step 5: 显式指定 Agent（跳过意图分类）")
+    print("    使用 target_agent 参数直接路由，无需 LLM 分类")
     print()
 
-    from src.warehouse.ddl_agent import DDLAgent
-    ddl_agent = DDLAgent(
-        llm=llm,
-        db=conn,
-        convention_file=convention_file,
+    explicit_result = orchestrator.chat(
+        message="查2025年5月所有订单的总金额",
+        target_agent="sql_query",
+        context={"db": conn, "convention_file": convention_file},
     )
 
-    print("    --- DDL Agent 工作过程 ---")
+    print(f"    用户: 查2025年5月所有订单的总金额")
+    print(f"    → 指定 Agent: sql_query（跳过分类）")
+    print(f"    → 状态: {'成功' if explicit_result.success else '失败'}")
+    if explicit_result.content:
+        lines = explicit_result.content.splitlines()
+        for line in lines[:15]:
+            print(f"    {line}")
     print()
-    ddl_result = ddl_agent.build(
-        source_table="order_items",
-        target_layer="DWS",
-        business_desc="商品销售日汇总表，按日期+商品维度聚合",
-    )
-
-    if ddl_result.success:
-        print()
-        print("    生成的 DDL:")
-        for line in (ddl_result.ddl or "").splitlines():
-            print(f"      {line}")
-        print()
-        print("    验证结果:")
-        for line in (ddl_result.verification or "无").splitlines():
-            print(f"      {line}")
-    else:
-        print(f"    DDL 生成失败: {ddl_result.error}")
-
-    print()
-    print(f"    工具调用 ({len(ddl_result.tool_calls_log)} 次):")
-    for entry in ddl_result.tool_calls_log:
-        args = entry["args"]
-        args_str = ", ".join(f"{k}={str(v)[:40]}" for k, v in args.items())
-        print(f"      [{entry['step']}] {entry['tool']}({args_str})")
 
     # ------------------------------------------------------------------
     #  汇总
     # ------------------------------------------------------------------
     print_section("汇总")
-    print("  [智能问数]")
-    for i, r in enumerate(all_results, 1):
-        status = "OK" if r.success else "FAIL"
-        has_sql = "有SQL" if r.sql else "无SQL"
-        calls = len(r.tool_calls_log)
-        mat = " → 已固化" if DEMO_QUESTIONS[i-1].get("materialize") else ""
-        print(f"    #{i} [{status}] {r.question[:40]}...  ({has_sql}, {calls}次调用{mat})")
+
+    for i, (demo, result) in enumerate(results, 1):
+        status = "OK" if result.success else "FAIL"
+        routed = result.agent_name
+        expected = demo["expect_agent"]
+        match = "✓" if routed == expected else "✗"
+        calls = result.metadata.get("tool_calls", 0)
+        print(f"    #{i} [{status}] 路由: {routed} {match}  工具调用: {calls}次")
+        print(f"        {demo['message'][:50]}...")
+
     print()
-    print("  [ETL 建表]")
-    status = "OK" if ddl_result.success else "FAIL"
-    calls = len(ddl_result.tool_calls_log)
-    print(f"    [{status}] order_items → DWS 层  ({calls}次调用)")
+    print(f"    显式指定: [{'OK' if explicit_result.success else 'FAIL'}]")
     print()
     print("  演示完成！")
     print()
