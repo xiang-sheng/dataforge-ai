@@ -486,13 +486,13 @@ class TestGovernanceAgentWrapper:
 
         wrapper = GovernanceAgentWrapper(llm=mock_llm, db=mock_db)
 
-        # Mock the BaseAgent._run_loop to return a fake response
+        # Mock the BaseAgent.invoke to return a fake response
         fake_response = MagicMock()
         fake_response.content = "## 治理报告\n发现 2 对冗余表"
 
         with patch("src.warehouse.tools.init_tool_context"), \
              patch("src.warehouse.tools.ALL_TOOLS", []), \
-             patch("src.warehouse.base_agent.BaseAgent._run_loop", return_value=fake_response):
+             patch("src.warehouse.base_agent.BaseAgent.invoke", return_value=fake_response):
 
             result = wrapper.process("检查冗余表")
 

@@ -1,8 +1,8 @@
 """
 DataForge AI - SQL Analysis Agent with Explicit Reasoning
 
-Uses BaseAgent for the ReAct loop. The model MUST output its thinking
-process (【思考过程】) before writing any SQL.
+Uses BaseAgent (powered by create_agent) for the tool-calling loop.
+The model MUST output its thinking process (【思考过程】) before writing any SQL.
 """
 
 from __future__ import annotations
@@ -84,22 +84,8 @@ class SQLAgent(BaseAgent):
             HumanMessage(content=f"请帮我分析：{question}"),
         ]
 
-        def on_reasoning(content: str) -> None:
-            if "【思考过程】" in content:
-                match = re.search(
-                    r"【思考过程】(.*?)(?=```sql|\Z)", content, re.DOTALL
-                )
-                if match:
-                    text = match.group(1).strip()
-                    print()
-                    print("    " + "=" * 56)
-                    print("    【思考过程】")
-                    for line in text.splitlines():
-                        print(f"    {line.strip()}")
-                    print("    " + "=" * 56)
-
         try:
-            final = self._run_loop(messages, log, on_reasoning=on_reasoning)
+            final = self.invoke(messages, log)
             content = final.content or ""
 
             sql_matches = re.findall(r"```sql\s*\n(.*?)```", content, re.DOTALL)

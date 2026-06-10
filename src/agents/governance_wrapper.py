@@ -76,8 +76,8 @@ class GovernanceAgentWrapper(ManagedAgent):
     def process(self, message: str, context: dict[str, Any] | None = None) -> AgentResult:
         """Run governance analysis on the database.
 
-        Uses BaseAgent's ReAct loop with the governance system prompt
-        to autonomously explore tables and identify redundancy.
+        Uses BaseAgent (powered by create_agent) to autonomously explore
+        tables and identify redundancy.
         """
         from src.warehouse.base_agent import BaseAgent, ToolCallLog
         from src.warehouse.tools import ALL_TOOLS, init_tool_context
@@ -98,7 +98,7 @@ class GovernanceAgentWrapper(ManagedAgent):
                 HumanMessage(content=f"请对当前数据库做数据治理分析，识别冗余表并给出治理建议。\n\n分析需求：{message}"),
             ]
 
-            final = agent._run_loop(messages, log)
+            final = agent.invoke(messages, log)
             content = final.content or "治理分析完成，但未输出有效报告。"
 
             return AgentResult(

@@ -1,8 +1,9 @@
 """
 DataForge AI - DDL Agent (ReAct Agent for DDL Generation)
 
-Uses BaseAgent for the ReAct loop. The model explores source schemas,
-reads conventions, designs target tables, generates DDL, and verifies.
+Uses BaseAgent (powered by create_agent) for the tool-calling loop.
+The model explores source schemas, reads conventions, designs target
+tables, generates DDL, and verifies.
 """
 
 from __future__ import annotations
@@ -102,7 +103,7 @@ class DDLAgent(BaseAgent):
         ]
 
         try:
-            final = self._run_loop(messages, log)
+            final = self.invoke(messages, log)
             content = final.content or ""
 
             matches = re.findall(r"```sql\s*\n(.*?)```", content, re.DOTALL)

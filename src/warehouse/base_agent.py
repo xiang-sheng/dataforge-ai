@@ -1,27 +1,22 @@
 """
-DataForge AI - Base Agent for ReAct tool-calling loops.
+DataForge AI - Base Agent powered by LangChain create_agent.
 
-Shared logic between SQLAgent and DDLAgent:
-  - Tool binding and mapping
-  - ReAct iteration loop
-  - Tool call logging
-  - Rate limiting (basic)
+All agents (SQLAgent, DDLAgent, GovernanceAgent) share this base:
+  - Tool binding via create_agent (LangGraph compiled graph)
+  - Tool call logging via callback handler
+  - Configurable recursion limit (replaces manual iteration loop)
 """
 
 from __future__ import annotations
 
+import json
 import logging
-import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Optional
 
-from langchain_core.messages import (
-    AIMessage,
-    BaseMessage,
-    HumanMessage,
-    SystemMessage,
-    ToolMessage,
-)
+from langchain.agents import create_agent
+from langchain_core.callbacks import BaseCallbackHandler
+from langchain_core.messages import AIMessage, BaseMessage
 
 logger = logging.getLogger(__name__)
 
@@ -34,95 +29,108 @@ class ToolCallLog:
     args: dict
 
 
+class _ToolCallTracker(BaseCallbackHandler):
+    """Callback handler that records tool calls for logging.
+
+    Attached to the agent's invoke() via the callbacks config.
+    """
+
+    def __init__(self) -> None:
+        self.calls: list[ToolCallLog] = []
+        self._step = 0
+
+    def on_tool_start(
+        self,
+        serialized: dict[str, Any],
+        input_str: str,
+        **kwargs: Any,
+    ) -> None:
+        self._step += 1
+        tool_name = serialized.get("name", "unknown")
+        try:
+            args = eval(input_str) if isinstance(input_str, str) else input_str
+            if not isinstance(args, dict):
+                args = {"input": input_str}
+        except Exception:
+            args = {"raw": input_str}
+
+        self.calls.append(ToolCallLog(
+            step=self._step,
+            tool=tool_name,
+            args=args,
+        ))
+
+        args_str = BaseAgent._fmt_args(args)
+        logger.info("[step=%d] %s(%s)", self._step, tool_name, args_str)
+
+
 class BaseAgent:
-    """Abstract base for ReAct agents with LangChain tool-calling.
+    """Base agent using LangChain's create_agent (LangGraph).
 
     Subclasses should:
-      - Set ``self.system_prompt`` and ``self.tools``
-      - Call ``_bind_tools(llm)`` in __init__
-      - Implement their own public entry method that calls ``_run_loop``
+      - Call ``super().__init__(llm, tools, system_prompt)`` in __init__
+      - Implement their own public entry method that calls ``invoke()``
+
+    The ``invoke()`` method replaces the old ``_run_loop()``:
+      - Creates a compiled agent graph via ``create_agent``
+      - Runs tool-calling loop automatically
+      - Returns the final AIMessage
     """
 
     MAX_ITERATIONS = 15
-    MIN_INTERVAL_BETWEEN_CALLS = 0.5  # seconds, basic rate limiting
 
     def __init__(self, llm: Any, tools: list, system_prompt: str):
         self.tools = tools
         self.system_prompt = system_prompt
+        self._llm = llm
         self._tool_map: dict[str, Any] = {t.name: t for t in tools}
-        self._bind_tools(llm)
 
-    def _bind_tools(self, llm: Any) -> None:
-        self.llm = llm.bind_tools(self.tools)
-
-    def _run_loop(
+    def invoke(
         self,
         messages: list[BaseMessage],
-        tool_calls_log: list[ToolCallLog],
-        on_reasoning: Any = None,
+        tool_calls_log: Optional[list[ToolCallLog]] = None,
     ) -> AIMessage:
-        """Execute the ReAct loop until the model stops calling tools.
+        """Run the agent with the given messages.
+
+        Uses ``create_agent`` to build a LangGraph agent that handles
+        tool binding and the tool-calling loop automatically.
 
         Args:
-            messages: Conversation messages (will be mutated in-place).
-            tool_calls_log: List to append tool call records to.
-            on_reasoning: Optional callback(content) when the model
-                          outputs text containing reasoning markers.
+            messages: Conversation messages (SystemMessage + HumanMessage, etc.).
+            tool_calls_log: Optional list to append ToolCallLog records to.
 
         Returns:
-            The final AIMessage with no tool calls.
+            The final AIMessage (with no pending tool calls).
         """
-        last_call_time = 0.0
-
-        for iteration in range(1, self.MAX_ITERATIONS + 1):
-            # Basic rate limiting
-            elapsed = time.monotonic() - last_call_time
-            if elapsed < self.MIN_INTERVAL_BETWEEN_CALLS:
-                time.sleep(self.MIN_INTERVAL_BETWEEN_CALLS - elapsed)
-
-            response: AIMessage = self.llm.invoke(messages)
-            messages.append(response)
-            last_call_time = time.monotonic()
-
-            # Notify reasoning callback
-            if response.content and on_reasoning:
-                on_reasoning(response.content)
-
-            tool_calls = getattr(response, "tool_calls", None)
-            if not tool_calls:
-                return response
-
-            for tc in tool_calls:
-                tc_name = tc["name"]
-                tc_args = tc["args"]
-                tc_id = tc["id"]
-
-                tool_calls_log.append(ToolCallLog(
-                    step=iteration,
-                    tool=tc_name,
-                    args=tc_args,
-                ))
-
-                args_str = self._fmt_args(tc_args)
-                logger.info("[step=%d] %s(%s)", iteration, tc_name, args_str)
-
-                tool_fn = self._tool_map.get(tc_name)
-                if tool_fn:
-                    try:
-                        output = tool_fn.invoke(tc_args)
-                    except Exception as e:
-                        output = f"工具执行异常: {e}"
-                else:
-                    output = f"未知工具: {tc_name}"
-
-                messages.append(ToolMessage(content=str(output), tool_call_id=tc_id))
-
-        return AIMessage(
-            content=f"[达到最大迭代 {self.MAX_ITERATIONS} 轮，请简化任务或拆分问题]"
+        agent = create_agent(
+            self._llm,
+            tools=self.tools,
+            system_prompt=self.system_prompt,
         )
+
+        tracker = _ToolCallTracker()
+        # recursion_limit counts graph steps (model + tool per iteration)
+        # 2 * MAX_ITERATIONS gives roughly the same number of LLM calls
+        config = {
+            "callbacks": [tracker],
+            "recursion_limit": self.MAX_ITERATIONS * 2,
+        }
+
+        result = agent.invoke({"messages": messages}, config=config)
+
+        if tool_calls_log is not None:
+            tool_calls_log.extend(tracker.calls)
+
+        # Extract final AI message
+        final_msgs = result.get("messages", [])
+        if final_msgs:
+            return final_msgs[-1]
+
+        return AIMessage(content="[Agent 未返回结果]")
 
     @staticmethod
     def _fmt_args(args: dict) -> str:
+        """Format tool arguments for logging."""
         parts = []
         for k, v in args.items():
             sv = str(v)
