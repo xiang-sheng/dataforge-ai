@@ -257,27 +257,12 @@ async def health_check() -> dict:
 
 
 # ------------------------------------------------------------------ #
-# API routers placeholder
-# ------------------------------------------------------------------ #
-#
-# In a full implementation you would import and include routers here:
-#
-# from src.api.connections import router as connections_router
-# from src.api.tables import router as tables_router
-# from src.api.sql_generation import router as sql_gen_router
-# from src.api.modeling import router as modeling_router
-# from src.api.lineage import router as lineage_router
-# from src.api.etl import router as etl_router
-#
-# app.include_router(connections_router, prefix=settings.api_prefix, tags=["Connections"])
-# app.include_router(tables_router,      prefix=settings.api_prefix, tags=["Tables"])
-# app.include_router(sql_gen_router,     prefix=settings.api_prefix, tags=["SQL Generation"])
-# app.include_router(modeling_router,    prefix=settings.api_prefix, tags=["Data Modeling"])
-# app.include_router(lineage_router,     prefix=settings.api_prefix, tags=["Lineage"])
-# app.include_router(etl_router,         prefix=settings.api_prefix, tags=["ETL"])
-#
+# API routers
 # ------------------------------------------------------------------ #
 
+from src.api.router import api_router
+
+app.include_router(api_router)
 
 # ------------------------------------------------------------------ #
 # Root endpoint

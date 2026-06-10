@@ -10,6 +10,7 @@ Shared logic between SQLAgent and DDLAgent:
 
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import dataclass, field
 from typing import Any, Optional
@@ -21,6 +22,8 @@ from langchain_core.messages import (
     SystemMessage,
     ToolMessage,
 )
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -101,7 +104,7 @@ class BaseAgent:
                 ))
 
                 args_str = self._fmt_args(tc_args)
-                print(f"    -> [{iteration}] {tc_name}({args_str})")
+                logger.info("[step=%d] %s(%s)", iteration, tc_name, args_str)
 
                 tool_fn = self._tool_map.get(tc_name)
                 if tool_fn:

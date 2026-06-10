@@ -7,11 +7,13 @@ These tools let the AI agent:
   - Materialize query results into persistent tables
   - Read convention files when building permanent tables
 
-Single-database design: all tools operate on one DuckDB connection.
+Uses contextvars for async-safe concurrent access — each async task
+gets its own isolated DuckDB connection and convention path.
 """
 
 from __future__ import annotations
 
+import contextvars
 import re
 from pathlib import Path
 from typing import Optional
@@ -21,10 +23,14 @@ from langchain_core.tools import tool
 
 
 # ---------------------------------------------------------------------------
-# Module-level DB handle
+# Async-safe context variables (replaces module-level globals)
 # ---------------------------------------------------------------------------
-_conn: Optional[duckdb.DuckDBPyConnection] = None
-_convention_path: Optional[str] = None
+_conn_var: contextvars.ContextVar[Optional[duckdb.DuckDBPyConnection]] = (
+    contextvars.ContextVar("_conn_var", default=None)
+)
+_convention_var: contextvars.ContextVar[Optional[str]] = (
+    contextvars.ContextVar("_convention_var", default=None)
+)
 
 # Identifier validation: only alphanumeric, underscore, no special chars
 _SAFE_IDENTIFIER = re.compile(r'^[A-Za-z_][A-Za-z0-9_]{0,127}$')
@@ -34,21 +40,24 @@ def init_tool_context(
     db: str | duckdb.DuckDBPyConnection,
     convention_file: Optional[str] = None,
 ) -> None:
-    """Bind a DuckDB connection for all tools. Call once before agent runs."""
-    global _conn, _convention_path
+    """Bind a DuckDB connection for all tools in the current async context.
 
+    Safe for concurrent use — each async task gets its own isolated context.
+    Call once before an agent run within the same task/coroutine.
+    """
     if isinstance(db, str):
-        _conn = duckdb.connect(db)
+        _conn_var.set(duckdb.connect(db))
     else:
-        _conn = db
+        _conn_var.set(db)
 
-    _convention_path = convention_file
+    _convention_var.set(convention_file)
 
 
 def get_conn() -> duckdb.DuckDBPyConnection:
-    if _conn is None:
+    conn = _conn_var.get()
+    if conn is None:
         raise RuntimeError("init_tool_context() not called")
-    return _conn
+    return conn
 
 
 def _validate_identifier(name: str, label: str = "identifier") -> str:
@@ -384,12 +393,13 @@ def read_convention() -> str:
 
     当需要将查询结果固化为持久化表时，应读取规范以确保符合标准。
     """
-    if not _convention_path:
+    convention_path = _convention_var.get()
+    if not convention_path:
         return "未配置建表规范文件。"
 
-    path = Path(_convention_path)
+    path = Path(convention_path)
     if not path.exists():
-        return f"规范文件不存在: {_convention_path}"
+        return f"规范文件不存在: {convention_path}"
 
     try:
         content = path.read_text(encoding="utf-8")

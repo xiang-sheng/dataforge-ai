@@ -352,12 +352,7 @@ class AppSettings(BaseSettings):
         current application settings.
 
         Maps :attr:`llm_provider` to the correct :class:`ModelProvider` enum
-        value and selects the appropriate settings fields for each backend:
-
-        * ``openai`` / ``azure_openai`` -- uses ``openai_*`` fields
-        * ``ollama`` / ``local``        -- uses ``ollama_*`` fields
-        * ``tongyi`` / ``deepseek``     -- uses ``openai_*`` fields (shared
-          OpenAI-compatible interface, with provider-specific defaults)
+        value and selects the appropriate settings fields for each backend.
 
         Returns:
             A fully populated ``ProviderConfig`` ready for
@@ -381,7 +376,7 @@ class AppSettings(BaseSettings):
                 f"Supported values: {', '.join(provider_map)}"
             )
 
-        # --- Ollama / local models ------------------------------------------
+        # Ollama / local models use their own config fields
         if provider in (ModelProvider.OLLAMA, ModelProvider.LOCAL):
             return ProviderConfig(
                 provider=provider,
@@ -394,60 +389,21 @@ class AppSettings(BaseSettings):
                 max_retries=self.openai_max_retries,
             )
 
-        # --- OpenAI ---------------------------------------------------------
-        if provider == ModelProvider.OPENAI:
-            return ProviderConfig(
-                provider=provider,
-                api_key=self.openai_api_key,
-                base_url=self.openai_api_base,
-                model=self.openai_model,
-                temperature=self.openai_temperature,
-                max_tokens=self.openai_max_tokens,
-                timeout=float(self.openai_request_timeout),
-                max_retries=self.openai_max_retries,
-            )
+        # All OpenAI-compatible providers share the same construction
+        base_url = self.openai_api_base
+        if provider == ModelProvider.DEEPSEEK and not base_url:
+            base_url = "https://api.deepseek.com"
 
-        # --- Azure OpenAI ---------------------------------------------------
-        if provider == ModelProvider.AZURE_OPENAI:
-            return ProviderConfig(
-                provider=provider,
-                api_key=self.openai_api_key,
-                base_url=self.openai_api_base,
-                model=self.openai_model,
-                temperature=self.openai_temperature,
-                max_tokens=self.openai_max_tokens,
-                timeout=float(self.openai_request_timeout),
-                max_retries=self.openai_max_retries,
-            )
-
-        # --- Tongyi (通义千问) -----------------------------------------------
-        if provider == ModelProvider.TONGYI:
-            return ProviderConfig(
-                provider=provider,
-                api_key=self.openai_api_key,
-                base_url=self.openai_api_base,
-                model=self.openai_model,
-                temperature=self.openai_temperature,
-                max_tokens=self.openai_max_tokens,
-                timeout=float(self.openai_request_timeout),
-                max_retries=self.openai_max_retries,
-            )
-
-        # --- DeepSeek (OpenAI-compatible) ------------------------------------
-        if provider == ModelProvider.DEEPSEEK:
-            return ProviderConfig(
-                provider=provider,
-                api_key=self.openai_api_key,
-                base_url=self.openai_api_base or "https://api.deepseek.com",
-                model=self.openai_model,
-                temperature=self.openai_temperature,
-                max_tokens=self.openai_max_tokens,
-                timeout=float(self.openai_request_timeout),
-                max_retries=self.openai_max_retries,
-            )
-
-        # Unreachable, but keeps mypy happy
-        raise ValueError(f"Unhandled provider: {provider}")  # pragma: no cover
+        return ProviderConfig(
+            provider=provider,
+            api_key=self.openai_api_key,
+            base_url=base_url,
+            model=self.openai_model,
+            temperature=self.openai_temperature,
+            max_tokens=self.openai_max_tokens,
+            timeout=float(self.openai_request_timeout),
+            max_retries=self.openai_max_retries,
+        )
 
     @classmethod
     def get_ai_provider(cls) -> "LangChainProvider":

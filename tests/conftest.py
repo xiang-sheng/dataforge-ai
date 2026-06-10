@@ -116,6 +116,10 @@ def mock_connection_manager() -> AsyncMock:
         return results
 
     async def _get_adapter(connection_id: str) -> AsyncMock:
+        # Validate connection exists before returning adapter
+        if connection_id not in _store:
+            raise ConnectionError(f"Connection '{connection_id}' not found.")
+
         adapter = AsyncMock()
         adapter.test = AsyncMock(return_value={
             "success": True,
