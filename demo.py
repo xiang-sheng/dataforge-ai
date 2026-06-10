@@ -76,6 +76,34 @@ CREATE TABLE IF NOT EXISTS users (
     vip_level     INTEGER      DEFAULT 0
 );
 COMMENT ON TABLE users IS '用户信息表';
+
+-- 冗余表：订单主表的备份（结构高度相似）
+CREATE TABLE IF NOT EXISTS orders_bak (
+    id              BIGINT       PRIMARY KEY,
+    order_no        VARCHAR(32)  NOT NULL,
+    user_id         BIGINT       NOT NULL,
+    total_amount    DECIMAL(10,2) NOT NULL,
+    status          VARCHAR(20)  NOT NULL,
+    payment_method  VARCHAR(20),
+    order_time      TIMESTAMP    NOT NULL,
+    pay_time        TIMESTAMP,
+    created_at      TIMESTAMP    DEFAULT CURRENT_TIMESTAMP
+);
+COMMENT ON TABLE orders_bak IS '订单主表备份（冗余）';
+
+-- 冗余表：订单明细表的副本（结构几乎相同）
+CREATE TABLE IF NOT EXISTS order_items_v2 (
+    id            BIGINT        PRIMARY KEY,
+    order_id      BIGINT        NOT NULL,
+    product_id    BIGINT        NOT NULL,
+    product_name  VARCHAR(200)  NOT NULL,
+    category      VARCHAR(100),
+    unit_price    DECIMAL(10,2) NOT NULL,
+    quantity      INTEGER       NOT NULL,
+    subtotal      DECIMAL(10,2) NOT NULL,
+    extra_note    VARCHAR(200)
+);
+COMMENT ON TABLE order_items_v2 IS '订单商品明细表V2版本（冗余）';
 """
 
 SAMPLE_DATA = """
@@ -151,6 +179,11 @@ DEMO_CONVERSATIONS = [
         "note": "意图：智能建表 → 自动路由到 ddl_build Agent",
         "expect_agent": "ddl_build",
     },
+    {
+        "message": "扫描当前数据库，检查有没有冗余表或重叠的表结构",
+        "note": "意图：数据治理 → 自动路由到 data_governance Agent",
+        "expect_agent": "data_governance",
+    },
 ]
 
 
@@ -221,6 +254,7 @@ def main():
         AgentOrchestrator,
         SQLAgentWrapper,
         DDLAgentWrapper,
+        GovernanceAgentWrapper,
     )
 
     convention_file = str(PROJECT_ROOT / "conventions" / "default_convention.yaml")
@@ -231,9 +265,11 @@ def main():
 
     sql_wrapper = SQLAgentWrapper(llm=llm, db=conn, convention_file=convention_file)
     ddl_wrapper = DDLAgentWrapper(llm=llm, db=conn, convention_file=convention_file)
+    gov_wrapper = GovernanceAgentWrapper(llm=llm, db=conn, convention_file=convention_file)
 
     registry.register(sql_wrapper)
     registry.register(ddl_wrapper)
+    registry.register(gov_wrapper)
 
     orchestrator = AgentOrchestrator(registry, llm)
 

@@ -95,16 +95,21 @@ def _create_ll():
 
 def _create_orchestrator(db_path: str = ":memory:", convention_file: Optional[str] = None):
     """Create a fully configured AgentOrchestrator with all agents registered."""
-    from src.agents import AgentRegistry, AgentOrchestrator, SQLAgentWrapper, DDLAgentWrapper
+    from src.agents import (
+        AgentRegistry, AgentOrchestrator,
+        SQLAgentWrapper, DDLAgentWrapper, GovernanceAgentWrapper,
+    )
 
     llm = _create_ll()
     registry = AgentRegistry()
 
     sql_agent = SQLAgentWrapper(llm=llm, db=db_path, convention_file=convention_file)
     ddl_agent = DDLAgentWrapper(llm=llm, db=db_path, convention_file=convention_file)
+    gov_agent = GovernanceAgentWrapper(llm=llm, db=db_path, convention_file=convention_file)
 
     registry.register(sql_agent)
     registry.register(ddl_agent)
+    registry.register(gov_agent)
 
     return AgentOrchestrator(registry, llm)
 

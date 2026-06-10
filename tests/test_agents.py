@@ -446,3 +446,56 @@ class TestOrchestratorEndToEnd:
         result = orch.chat("测试一下")
         assert result.success is True
         assert result.agent_name == "mock_agent"
+
+
+# ===================================================================
+#  GovernanceAgentWrapper tests
+# ===================================================================
+
+
+class TestGovernanceAgentWrapper:
+    def test_wrapper_metadata(self):
+        from src.agents.governance_wrapper import GovernanceAgentWrapper
+        w = GovernanceAgentWrapper(llm=MagicMock(), db=":memory:")
+        assert w.name == "data_governance"
+        assert "数据治理" in w.description
+        assert "冗余" in w.intent_keywords
+
+    def test_keyword_routing(self):
+        """Governance keywords should match in the router."""
+        from src.agents.governance_wrapper import GovernanceAgentWrapper
+
+        reg = AgentRegistry()
+        reg.register(MockAgent())
+        reg.register(GovernanceAgentWrapper(llm=MagicMock(), db=":memory:"))
+
+        llm = MagicMock()
+        llm.invoke.side_effect = Exception("LLM down")  # force keyword fallback
+
+        router = IntentRouter(reg, llm)
+        result = router.classify("帮我检查一下有没有冗余表")
+        assert result == "data_governance"
+
+    def test_process_with_mock(self):
+        """Test that governance wrapper runs BaseAgent and returns result."""
+        from src.agents.governance_wrapper import GovernanceAgentWrapper
+        from unittest.mock import patch
+
+        mock_llm = MagicMock()
+        mock_db = MagicMock()
+
+        wrapper = GovernanceAgentWrapper(llm=mock_llm, db=mock_db)
+
+        # Mock the BaseAgent._run_loop to return a fake response
+        fake_response = MagicMock()
+        fake_response.content = "## 治理报告\n发现 2 对冗余表"
+
+        with patch("src.warehouse.tools.init_tool_context"), \
+             patch("src.warehouse.tools.ALL_TOOLS", []), \
+             patch("src.warehouse.base_agent.BaseAgent._run_loop", return_value=fake_response):
+
+            result = wrapper.process("检查冗余表")
+
+            assert result.success is True
+            assert result.agent_name == "data_governance"
+            assert "冗余" in result.content

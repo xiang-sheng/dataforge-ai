@@ -6,6 +6,7 @@ from src.agents.router import IntentRouter
 from src.agents.orchestrator import AgentOrchestrator
 from src.agents.sql_wrapper import SQLAgentWrapper
 from src.agents.ddl_wrapper import DDLAgentWrapper
+from src.agents.governance_wrapper import GovernanceAgentWrapper
 
 __all__ = [
     "AgentResult",
@@ -15,4 +16,5 @@ __all__ = [
     "AgentOrchestrator",
     "SQLAgentWrapper",
     "DDLAgentWrapper",
+    "GovernanceAgentWrapper",
 ]

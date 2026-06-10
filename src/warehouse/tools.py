@@ -412,6 +412,96 @@ def read_convention() -> str:
         return f"读取失败: {e}"
 
 
+@tool
+def compare_tables(table_a: str, table_b: str) -> str:
+    """对比两张表的结构和数据重叠程度，用于识别冗余表。
+
+    比较维度：列名相似度、类型匹配度、行数差异、样本数据重叠。
+
+    Args:
+        table_a: 第一张表名
+        table_b: 第二张表名
+    """
+    try:
+        _validate_identifier(table_a, "表A")
+        _validate_identifier(table_b, "表B")
+        conn = get_conn()
+
+        def _get_columns(tbl: str) -> list[tuple[str, str]]:
+            """Return [(column_name, data_type), ...]"""
+            return conn.execute("""
+                SELECT column_name, data_type
+                FROM information_schema.columns
+                WHERE table_name = ? AND table_schema = 'main'
+                ORDER BY ordinal_position
+            """, [tbl]).fetchall()
+
+        def _get_row_count(tbl: str) -> int:
+            r = conn.execute(f'SELECT COUNT(*) FROM "{tbl}"').fetchone()
+            return r[0] if r else 0
+
+        cols_a = _get_columns(table_a)
+        cols_b = _get_columns(table_b)
+
+        if not cols_a:
+            return f"表 '{table_a}' 不存在或无字段。"
+        if not cols_b:
+            return f"表 '{table_b}' 不存在或无字段。"
+
+        names_a = {c[0].lower() for c in cols_a}
+        names_b = {c[0].lower() for c in cols_b}
+
+        # Column name similarity
+        common = names_a & names_b
+        only_a = names_a - names_b
+        only_b = names_b - names_a
+        union = names_a | names_b
+        similarity = len(common) / len(union) if union else 0
+
+        # Type match for common columns
+        type_map_a = {c[0].lower(): c[1] for c in cols_a}
+        type_map_b = {c[0].lower(): c[1] for c in cols_b}
+        type_match = sum(
+            1 for col in common
+            if type_map_a.get(col, "").upper() == type_map_b.get(col, "").upper()
+        )
+
+        # Row counts
+        cnt_a = _get_row_count(table_a)
+        cnt_b = _get_row_count(table_b)
+
+        lines = [f"表对比: {table_a} vs {table_b}\n"]
+        lines.append(f"  列名相似度: {similarity:.0%} ({len(common)}/{len(union)})")
+        lines.append(f"  共有列: {len(common)} 个")
+        if common:
+            lines.append(f"    {', '.join(sorted(common))}")
+        lines.append(f"  类型匹配: {type_match}/{len(common)} 个共有列类型一致")
+        lines.append(f"  仅 {table_a} 有: {len(only_a)} 个")
+        if only_a:
+            lines.append(f"    {', '.join(sorted(only_a))}")
+        lines.append(f"  仅 {table_b} 有: {len(only_b)} 个")
+        if only_b:
+            lines.append(f"    {', '.join(sorted(only_b))}")
+        lines.append(f"  行数: {table_a}={cnt_a}, {table_b}={cnt_b}")
+
+        # Redundancy verdict
+        if similarity >= 0.8 and type_match / max(len(common), 1) >= 0.8:
+            lines.append(f"\n  ⚠ 高度相似 — 可能是冗余表，建议合并审查")
+        elif similarity >= 0.5:
+            lines.append(f"\n  △ 部分重叠 — 有合并优化空间")
+        else:
+            lines.append(f"\n  ✓ 差异较大 — 无明显冗余")
+
+        return "\n".join(lines)
+
+    except ValueError as e:
+        return str(e)
+    except duckdb.Error as e:
+        return f"表对比失败: {e}"
+    except RuntimeError as e:
+        return f"初始化错误: {e}"
+
+
 # ===================================================================
 #  Tool list
 # ===================================================================
@@ -424,4 +514,5 @@ ALL_TOOLS = [
     execute_ddl,
     create_table_from_query,
     read_convention,
+    compare_tables,
 ]

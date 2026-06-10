@@ -9,6 +9,7 @@ import pytest
 from src.warehouse.tools import (
     ALL_TOOLS,
     _validate_identifier,
+    compare_tables,
     create_table_from_query,
     describe_table,
     execute_ddl,
@@ -212,3 +213,48 @@ class TestReadConvention:
             init_tool_context(duckdb.connect(":memory:"), conv_path)
             result = read_convention.invoke({})
             assert "规范文件" in result
+
+
+# --- compare_tables ---
+
+
+class TestCompareTables:
+    def test_identical_tables(self, setup_db):
+        """Two tables with identical schemas should show 100% similarity."""
+        setup_db.execute("""
+            CREATE TABLE users_copy (id INTEGER, name VARCHAR, age INTEGER)
+        """)
+        setup_db.execute("INSERT INTO users_copy VALUES (1, 'Alice', 30)")
+        result = compare_tables.invoke({"table_a": "users", "table_b": "users_copy"})
+        assert "100%" in result
+        assert "冗余" in result or "高度相似" in result
+
+    def test_different_tables(self, setup_db):
+        """Tables with completely different schemas should show low similarity."""
+        setup_db.execute("""
+            CREATE TABLE products (pid INTEGER, title VARCHAR, price DOUBLE, stock INTEGER)
+        """)
+        result = compare_tables.invoke({"table_a": "users", "table_b": "products"})
+        assert "差异较大" in result
+
+    def test_partial_overlap(self, setup_db):
+        """Tables sharing some columns should show partial overlap."""
+        setup_db.execute("""
+            CREATE TABLE user_profiles (id INTEGER, name VARCHAR, email VARCHAR, bio VARCHAR)
+        """)
+        result = compare_tables.invoke({"table_a": "users", "table_b": "user_profiles"})
+        assert "共有列" in result
+        assert "id" in result.lower()
+
+    def test_nonexistent_table(self, setup_db):
+        result = compare_tables.invoke({"table_a": "users", "table_b": "ghost_table"})
+        assert "不存在" in result
+
+    def test_injection_rejected(self, setup_db):
+        result = compare_tables.invoke({"table_a": "users; DROP TABLE users", "table_b": "users"})
+        assert "不安全" in result
+
+    def test_all_tools_includes_compare(self):
+        """compare_tables should be in ALL_TOOLS list."""
+        tool_names = [t.name for t in ALL_TOOLS]
+        assert "compare_tables" in tool_names
