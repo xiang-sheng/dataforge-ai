@@ -18,6 +18,7 @@ from src.warehouse.tools import (
     init_tool_context,
     list_tables,
     read_convention,
+    scan_redundancy_candidates,
 )
 
 
@@ -258,3 +259,60 @@ class TestCompareTables:
         """compare_tables should be in ALL_TOOLS list."""
         tool_names = [t.name for t in ALL_TOOLS]
         assert "compare_tables" in tool_names
+
+
+# --- scan_redundancy_candidates ---
+
+
+class TestScanRedundancyCandidates:
+    def test_finds_similar_tables(self, setup_db):
+        """Tables with identical schemas should be flagged as candidates."""
+        from unittest.mock import patch, MagicMock
+        from src.warehouse.embedding import CandidatePair
+
+        setup_db.execute("""
+            CREATE TABLE orders_bak (
+                id INTEGER, user_id INTEGER, amount DECIMAL(18,2),
+                status VARCHAR, created_at TIMESTAMP
+            )
+        """)
+        setup_db.execute("INSERT INTO orders_bak VALUES (1, 1, 10.0, 'ok', '2025-01-01')")
+
+        # Mock the SchemaEmbedder to return a predefined candidate
+        mock_embedder = MagicMock()
+        mock_embedder.find_candidates.return_value = [
+            CandidatePair("orders", "orders_bak", 0.92, 5, 5, 1, 1),
+        ]
+
+        with patch("src.warehouse.embedding.SchemaEmbedder", return_value=mock_embedder):
+            result = scan_redundancy_candidates.invoke({
+                "similarity_threshold": 0.5, "top_k": 10
+            })
+            assert "候选" in result
+            assert "orders" in result
+
+    def test_empty_db(self):
+        """Empty database should report no need for detection."""
+        init_tool_context(duckdb.connect(":memory:"))
+        result = scan_redundancy_candidates.invoke({
+            "similarity_threshold": 0.5, "top_k": 10
+        })
+        assert "无需" in result or "0" in result or "1" in result
+
+    def test_single_table(self, setup_db):
+        """Database with only the setup 'users' table."""
+        # setup_db creates 'users' table by default
+        # Clear other tables if any
+        init_tool_context(duckdb.connect(":memory:"))
+        conn = duckdb.connect(":memory:")
+        conn.execute("CREATE TABLE only_table (id INTEGER)")
+        init_tool_context(conn)
+        result = scan_redundancy_candidates.invoke({
+            "similarity_threshold": 0.5, "top_k": 10
+        })
+        assert "无需" in result
+
+    def test_all_tools_includes_scan(self):
+        """scan_redundancy_candidates should be in ALL_TOOLS."""
+        tool_names = [t.name for t in ALL_TOOLS]
+        assert "scan_redundancy_candidates" in tool_names

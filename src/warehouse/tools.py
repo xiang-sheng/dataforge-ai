@@ -413,6 +413,88 @@ def read_convention() -> str:
 
 
 @tool
+def scan_redundancy_candidates(
+    similarity_threshold: float = 0.5,
+    top_k: int = 20,
+) -> str:
+    """扫描全库，用 Embedding + 余弦相似度预筛冗余候选表对。
+
+    将所有表的 schema（表名 + 列名 + 类型 + 行数）编码为向量，
+    计算余弦相似度矩阵，返回高于阈值的候选对（按相似度降序）。
+
+    这是数据治理的第一步，后续对候选对使用 compare_tables 做详细分析。
+
+    Args:
+        similarity_threshold: 最低相似度阈值，默认 0.5（低于此值直接排除）
+        top_k: 最多返回多少对候选，默认 20
+    """
+    try:
+        from src.warehouse.embedding import SchemaEmbedder, extract_schemas_from_db
+
+        conn = get_conn()
+        schemas = extract_schemas_from_db(conn)
+
+        if len(schemas) < 2:
+            return f"数据库中仅有 {len(schemas)} 张表，无需冗余检测。"
+
+        embedder = SchemaEmbedder()
+        candidates = embedder.find_candidates(
+            schemas, threshold=similarity_threshold, top_k=top_k
+        )
+
+        if not candidates:
+            return (
+                f"扫描完成（{len(schemas)} 张表），"
+                f"未发现相似度 ≥ {similarity_threshold:.0%} 的候选表对。\n"
+                "数据库表结构差异较大，无明显冗余。"
+            )
+
+        # Format output
+        high = [c for c in candidates if c.similarity >= 0.8]
+        medium = [c for c in candidates if 0.6 <= c.similarity < 0.8]
+        low = [c for c in candidates if c.similarity < 0.6]
+
+        lines = [
+            f"冗余候选扫描结果（{len(schemas)} 张表 → {len(candidates)} 对候选，"
+            f"阈值 ≥ {similarity_threshold:.0%}）:\n"
+        ]
+
+        for idx, c in enumerate(candidates, 1):
+            lines.append(
+                f"  {idx}. {c.table_a} ↔ {c.table_b}  "
+                f"相似度 {c.similarity:.1%}  {c.verdict}"
+            )
+            lines.append(
+                f"     {c.table_a}: {c.columns_a}列, {c.rows_a}行  |  "
+                f"{c.table_b}: {c.columns_b}列, {c.rows_b}行"
+            )
+
+        # Summary
+        lines.append("")
+        if high:
+            lines.append(
+                f"⚠ {len(high)} 对高度冗余（≥80%），建议优先用 compare_tables 详细分析。"
+            )
+        if medium:
+            lines.append(
+                f"△ {len(medium)} 对部分重叠（60-80%），可选择性分析。"
+            )
+        if low:
+            lines.append(
+                f"○ {len(low)} 对低相似度（<60%），通常无需关注。"
+            )
+
+        return "\n".join(lines)
+
+    except ImportError as e:
+        return f"Embedding 依赖缺失: {e}。请安装 sentence-transformers。"
+    except RuntimeError as e:
+        return f"初始化错误: {e}"
+    except Exception as e:
+        return f"冗余扫描失败: {e}"
+
+
+@tool
 def compare_tables(table_a: str, table_b: str) -> str:
     """对比两张表的结构和数据重叠程度，用于识别冗余表。
 
@@ -514,5 +596,6 @@ ALL_TOOLS = [
     execute_ddl,
     create_table_from_query,
     read_convention,
+    scan_redundancy_candidates,
     compare_tables,
 ]

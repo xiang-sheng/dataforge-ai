@@ -52,6 +52,8 @@ dependencies = [
     "python-dotenv>=1.0.0,<2.0.0",
     # Caching
     "redis>=5.0.0,<6.0.0",
+    # Embedding for data governance pre-filtering
+    "sentence-transformers>=3.0.0,<6.0.0",
 ]
 
 [project.optional-dependencies]
