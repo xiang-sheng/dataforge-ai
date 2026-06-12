@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Application settings for DataForge AI.
 
@@ -10,10 +9,13 @@ for every knob in the system.
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import List, Optional
+from typing import TYPE_CHECKING
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+if TYPE_CHECKING:
+    from src.ai.provider import LangChainProvider, ProviderConfig
 
 
 class AppSettings(BaseSettings):
@@ -68,7 +70,7 @@ class AppSettings(BaseSettings):
         description="URL prefix applied to every versioned router.",
     )
 
-    cors_origins: List[str] = Field(
+    cors_origins: list[str] = Field(
         default=["http://localhost:3000", "http://localhost:8080"],
         description=(
             "List of allowed CORS origins. "
@@ -152,12 +154,12 @@ class AppSettings(BaseSettings):
     # OpenAI / LLM settings
     # ------------------------------------------------------------------ #
 
-    openai_api_key: Optional[str] = Field(
+    openai_api_key: str | None = Field(
         default=None,
         description="OpenAI API key. Required for AI-assisted SQL generation and modelling.",
     )
 
-    openai_api_base: Optional[str] = Field(
+    openai_api_base: str | None = Field(
         default=None,
         description=(
             "Override the OpenAI base URL to point at an Azure OpenAI endpoint, "
@@ -278,7 +280,7 @@ class AppSettings(BaseSettings):
     # Convention file settings
     # ------------------------------------------------------------------ #
 
-    convention_file_path: Optional[str] = Field(
+    convention_file_path: str | None = Field(
         default=None,
         description=(
             "Path to the default table creation convention file (YAML or Markdown). "
@@ -306,7 +308,7 @@ class AppSettings(BaseSettings):
     # JWT / auth (future use — placeholder)
     # ------------------------------------------------------------------ #
 
-    jwt_secret_key: Optional[str] = Field(
+    jwt_secret_key: str | None = Field(
         default=None,
         description="Secret key for HS256 JWT signing. Required when auth is enabled.",
     )
@@ -347,7 +349,7 @@ class AppSettings(BaseSettings):
     # Bridge to AI provider layer
     # ------------------------------------------------------------------ #
 
-    def get_provider_config(self) -> "ProviderConfig":
+    def get_provider_config(self) -> ProviderConfig:
         """Construct a :class:`~src.ai.provider.ProviderConfig` from the
         current application settings.
 
@@ -406,7 +408,7 @@ class AppSettings(BaseSettings):
         )
 
     @classmethod
-    def get_ai_provider(cls) -> "LangChainProvider":
+    def get_ai_provider(cls) -> LangChainProvider:
         """Convenience class method that creates a fully initialised
         :class:`~src.ai.provider.LangChainProvider` from the current
         application settings.

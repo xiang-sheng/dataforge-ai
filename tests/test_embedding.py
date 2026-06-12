@@ -1,17 +1,15 @@
 """Tests for src.warehouse.embedding — schema embedding & similarity."""
 
+from unittest.mock import MagicMock
+
 import duckdb
 import numpy as np
-import pytest
-from unittest.mock import patch, MagicMock
-
 from src.warehouse.embedding import (
     CandidatePair,
     SchemaEmbedder,
     TableSchema,
     extract_schemas_from_db,
 )
-
 
 # --- TableSchema ---
 

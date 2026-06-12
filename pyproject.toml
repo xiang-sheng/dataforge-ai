@@ -46,7 +46,7 @@ dependencies = [
     "langchain-core>=0.3.0,<1.0.0",
     "langchain-openai>=0.3.0,<1.0.0",
     "langchain-community>=0.3.0,<1.0.0",
-    "langchain>=0.3.0,<1.0.0",
+    "langchain>=1.0.0,<2.0.0",
     # Settings & config
     "pydantic-settings>=2.0.0,<3.0.0",
     "python-dotenv>=1.0.0,<2.0.0",
@@ -104,7 +104,10 @@ select = [
     "RUF", # ruff-specific rules
 ]
 ignore = [
-    "E501", # line too long (handled by formatter)
+    "E501",   # line too long (handled by formatter)
+    "RUF001", # ambiguous unicode in string (Chinese punctuation is intentional)
+    "RUF002", # ambiguous unicode in docstring (Chinese punctuation is intentional)
+    "B008",   # function call in default arg (standard FastAPI Depends/Query pattern)
 ]
 
 [tool.ruff.lint.isort]

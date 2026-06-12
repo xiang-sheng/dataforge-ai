@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 DataForge AI - Data warehouse layer definitions.
 
@@ -11,15 +10,14 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any, Dict, List, Optional, Set
-
+from enum import StrEnum
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # Layer enum with Chinese descriptions
 # ---------------------------------------------------------------------------
 
-class WarehouseLayer(str, Enum):
+class WarehouseLayer(StrEnum):
     """Standard data warehouse layers with Chinese descriptions.
 
     Each layer serves a specific role in the data processing pipeline,
@@ -115,8 +113,8 @@ class LayerConfig:
     compression: str = "snappy"
     retention_days: int = 365
     requires_partition: bool = True
-    allowed_dml: Set[str] = field(default_factory=lambda: {"INSERT", "INSERT OVERWRITE"})
-    naming_examples: List[str] = field(default_factory=list)
+    allowed_dml: set[str] = field(default_factory=lambda: {"INSERT", "INSERT OVERWRITE"})
+    naming_examples: list[str] = field(default_factory=list)
 
     def validate_table_name(self, table_name: str) -> bool:
         """Check whether a table name conforms to this layer's naming convention.
@@ -131,7 +129,7 @@ class LayerConfig:
 
 
 # Default layer configurations following OneData naming conventions
-DEFAULT_LAYER_CONFIGS: Dict[WarehouseLayer, LayerConfig] = {
+DEFAULT_LAYER_CONFIGS: dict[WarehouseLayer, LayerConfig] = {
     WarehouseLayer.ODS: LayerConfig(
         layer=WarehouseLayer.ODS,
         name_prefix="ods_",
@@ -226,11 +224,11 @@ class LayerTransition:
     allowed: bool = True
     transformation_type: str = ""
     description: str = ""
-    validation_rules: List[str] = field(default_factory=list)
+    validation_rules: list[str] = field(default_factory=list)
 
 
 # Standard valid transitions in a layered warehouse
-STANDARD_TRANSITIONS: List[LayerTransition] = [
+STANDARD_TRANSITIONS: list[LayerTransition] = [
     LayerTransition(
         source_layer=WarehouseLayer.ODS,
         target_layer=WarehouseLayer.DWD,
@@ -343,12 +341,12 @@ class LayerValidator:
 
     def __init__(
         self,
-        layer_configs: Optional[Dict[WarehouseLayer, LayerConfig]] = None,
-        transitions: Optional[List[LayerTransition]] = None,
+        layer_configs: dict[WarehouseLayer, LayerConfig] | None = None,
+        transitions: list[LayerTransition] | None = None,
     ) -> None:
         self._configs = layer_configs or DEFAULT_LAYER_CONFIGS
         self._transitions = transitions or STANDARD_TRANSITIONS
-        self._transition_map: Dict[tuple[WarehouseLayer, WarehouseLayer], LayerTransition] = {}
+        self._transition_map: dict[tuple[WarehouseLayer, WarehouseLayer], LayerTransition] = {}
         for t in self._transitions:
             self._transition_map[(t.source_layer, t.target_layer)] = t
 
@@ -356,7 +354,7 @@ class LayerValidator:
         self,
         table_name: str,
         layer: WarehouseLayer,
-    ) -> List[str]:
+    ) -> list[str]:
         """Validate that a table name is appropriate for its assigned layer.
 
         Args:
@@ -367,7 +365,7 @@ class LayerValidator:
             A list of validation error messages.  An empty list means the
             placement is valid.
         """
-        errors: List[str] = []
+        errors: list[str] = []
         config = self._configs.get(layer)
 
         if config is None:
@@ -420,7 +418,7 @@ class LayerValidator:
         self,
         source: WarehouseLayer,
         target: WarehouseLayer,
-    ) -> Optional[LayerTransition]:
+    ) -> LayerTransition | None:
         """Return the transition rule for a source-target pair, if any.
 
         Args:
@@ -432,7 +430,7 @@ class LayerValidator:
         """
         return self._transition_map.get((source, target))
 
-    def get_allowed_targets(self, source: WarehouseLayer) -> List[WarehouseLayer]:
+    def get_allowed_targets(self, source: WarehouseLayer) -> list[WarehouseLayer]:
         """Return all layers that *source* is allowed to feed into.
 
         Args:
@@ -447,7 +445,7 @@ class LayerValidator:
             if t.source_layer == source and t.allowed
         ]
 
-    def get_allowed_sources(self, target: WarehouseLayer) -> List[WarehouseLayer]:
+    def get_allowed_sources(self, target: WarehouseLayer) -> list[WarehouseLayer]:
         """Return all layers that are allowed to feed into *target*.
 
         Args:
@@ -464,9 +462,9 @@ class LayerValidator:
 
     def validate_data_flow(
         self,
-        flow_graph: Dict[str, List[str]],
-        table_layers: Dict[str, WarehouseLayer],
-    ) -> List[str]:
+        flow_graph: dict[str, list[str]],
+        table_layers: dict[str, WarehouseLayer],
+    ) -> list[str]:
         """Validate an entire data flow graph for layer compliance.
 
         Args:
@@ -477,7 +475,7 @@ class LayerValidator:
         Returns:
             A list of validation error messages.
         """
-        errors: List[str] = []
+        errors: list[str] = []
 
         for table, upstream_tables in flow_graph.items():
             target_layer = table_layers.get(table)
@@ -508,13 +506,13 @@ class LayerValidator:
 
         return errors
 
-    def get_layer_summary(self) -> Dict[WarehouseLayer, Dict[str, Any]]:
+    def get_layer_summary(self) -> dict[WarehouseLayer, dict[str, Any]]:
         """Return a summary of all layer configurations and their rules.
 
         Returns:
             A dict keyed by ``WarehouseLayer`` with configuration details.
         """
-        summary: Dict[WarehouseLayer, Dict[str, Any]] = {}
+        summary: dict[WarehouseLayer, dict[str, Any]] = {}
         for layer, config in self._configs.items():
             summary[layer] = {
                 "chinese_name": layer.chinese_name,

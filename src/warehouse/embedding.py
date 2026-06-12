@@ -13,8 +13,8 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from itertools import combinations
-from typing import Optional
 
+import duckdb
 import numpy as np
 
 logger = logging.getLogger(__name__)
@@ -125,8 +125,8 @@ class SchemaEmbedder:
         sim_matrix = normalized @ normalized.T
 
         # Build schema lookup
-        schema_map = {s.table_name: s for s in schemas}
-        names = [s.table_name for s in schemas]
+        {s.table_name: s for s in schemas}
+        [s.table_name for s in schemas]
 
         # Extract upper triangle pairs, filter by threshold
         candidates: list[CandidatePair] = []
@@ -149,7 +149,7 @@ class SchemaEmbedder:
         return candidates[:top_k]
 
 
-def extract_schemas_from_db(conn) -> list[TableSchema]:
+def extract_schemas_from_db(conn: duckdb.DuckDBPyConnection) -> list[TableSchema]:
     """Extract all table schemas from a DuckDB connection.
 
     Args:
@@ -176,13 +176,14 @@ def extract_schemas_from_db(conn) -> list[TableSchema]:
             ORDER BY ordinal_position
         """, [table_name]).fetchall()
 
-        # Get row count
+        # Get row count — table_name comes from information_schema so is safe,
+        # but we still quote it to handle unusual names.
         try:
             cnt = conn.execute(
                 f'SELECT COUNT(*) FROM "{table_name}"'
             ).fetchone()
             row_count = cnt[0] if cnt else 0
-        except Exception:
+        except duckdb.Error:
             row_count = 0
 
         schemas.append(TableSchema(

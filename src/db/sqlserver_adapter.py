@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 SQL Server adapter for DataForge AI.
 
@@ -14,7 +13,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from sqlalchemy import text
 
@@ -22,7 +21,6 @@ from src.core.exceptions import ConnectionError, QueryExecutionError
 from src.core.schemas import (
     ColumnDataType,
     ColumnInfo,
-    ConnectionConfig,
     ConnectionTestResult,
     IndexInfo,
     IndexType,
@@ -33,7 +31,7 @@ from src.db.base import AbstractBaseAdapter
 
 logger = logging.getLogger(__name__)
 
-_MSSQL_TYPE_MAP: Dict[str, ColumnDataType] = {
+_MSSQL_TYPE_MAP: dict[str, ColumnDataType] = {
     "tinyint": ColumnDataType.INTEGER,
     "smallint": ColumnDataType.INTEGER,
     "int": ColumnDataType.INTEGER,
@@ -128,13 +126,13 @@ class SQLServerAdapter(AbstractBaseAdapter):
     # Metadata — databases & schemas
     # ------------------------------------------------------------------ #
 
-    async def get_databases(self) -> List[str]:
+    async def get_databases(self) -> list[str]:
         rows = await self.execute_query(
             "SELECT name FROM sys.databases WHERE state = 0 ORDER BY name"
         )
         return [row["name"] for row in rows]
 
-    async def get_schemas(self, database: Optional[str] = None) -> List[str]:
+    async def get_schemas(self, database: str | None = None) -> list[str]:
         rows = await self.execute_query(
             """
             SELECT s.name
@@ -151,17 +149,17 @@ class SQLServerAdapter(AbstractBaseAdapter):
 
     async def get_tables(
         self,
-        database: Optional[str] = None,
-        schema: Optional[str] = None,
-        table_type: Optional[str] = None,
-    ) -> List[str]:
+        database: str | None = None,
+        schema: str | None = None,
+        table_type: str | None = None,
+    ) -> list[str]:
         sch = self._default_schema(schema) or "dbo"
         sql = """
             SELECT TABLE_NAME
             FROM INFORMATION_SCHEMA.TABLES
             WHERE TABLE_SCHEMA = :schema
         """
-        params: Dict[str, Any] = {"schema": sch}
+        params: dict[str, Any] = {"schema": sch}
         if table_type:
             sql += " AND TABLE_TYPE = :ttype"
             params["ttype"] = table_type
@@ -174,8 +172,8 @@ class SQLServerAdapter(AbstractBaseAdapter):
     async def get_table_schema(
         self,
         table_name: str,
-        database: Optional[str] = None,
-        schema: Optional[str] = None,
+        database: str | None = None,
+        schema: str | None = None,
     ) -> TableSchema:
         sch = self._default_schema(schema) or "dbo"
         db = self._default_database(database)
@@ -221,9 +219,9 @@ class SQLServerAdapter(AbstractBaseAdapter):
     async def get_columns(
         self,
         table_name: str,
-        database: Optional[str] = None,
-        schema: Optional[str] = None,
-    ) -> List[ColumnInfo]:
+        database: str | None = None,
+        schema: str | None = None,
+    ) -> list[ColumnInfo]:
         sch = self._default_schema(schema) or "dbo"
         sql = """
             SELECT
@@ -256,7 +254,7 @@ class SQLServerAdapter(AbstractBaseAdapter):
             ORDER BY c.column_id
         """
         rows = await self.execute_query(sql, {"schema": sch, "tbl": table_name})
-        columns: List[ColumnInfo] = []
+        columns: list[ColumnInfo] = []
         for row in rows:
             data_type = row["data_type"]
             # Build a display type with length/precision
@@ -290,9 +288,9 @@ class SQLServerAdapter(AbstractBaseAdapter):
     async def get_indexes(
         self,
         table_name: str,
-        database: Optional[str] = None,
-        schema: Optional[str] = None,
-    ) -> List[IndexInfo]:
+        database: str | None = None,
+        schema: str | None = None,
+    ) -> list[IndexInfo]:
         sch = self._default_schema(schema) or "dbo"
         sql = """
             SELECT
@@ -312,7 +310,7 @@ class SQLServerAdapter(AbstractBaseAdapter):
             ORDER BY i.name
         """
         rows = await self.execute_query(sql, {"schema": sch, "tbl": table_name})
-        indexes: List[IndexInfo] = []
+        indexes: list[IndexInfo] = []
         for row in rows:
             if row["is_primary_key"]:
                 idx_type = IndexType.PRIMARY
@@ -344,16 +342,16 @@ class SQLServerAdapter(AbstractBaseAdapter):
     async def execute_query(
         self,
         sql: str,
-        parameters: Optional[Dict[str, Any]] = None,
-        max_rows: Optional[int] = None,
-    ) -> List[Dict[str, Any]]:
+        parameters: dict[str, Any] | None = None,
+        max_rows: int | None = None,
+    ) -> list[dict[str, Any]]:
         try:
             async with self.engine.connect() as conn:
                 result = await conn.execute(text(sql), parameters or {})
                 if result.returns_rows:
                     columns = list(result.keys())
                     rows = result.fetchmany(max_rows) if max_rows else result.fetchall()
-                    return [dict(zip(columns, row)) for row in rows]
+                    return [dict(zip(columns, row, strict=False)) for row in rows]
                 return []
         except Exception as exc:
             raise QueryExecutionError(
@@ -378,8 +376,8 @@ class SQLServerAdapter(AbstractBaseAdapter):
     async def get_create_table_sql(
         self,
         table_name: str,
-        database: Optional[str] = None,
-        schema: Optional[str] = None,
+        database: str | None = None,
+        schema: str | None = None,
     ) -> str:
         """
         SQL Server has no built-in SHOW CREATE TABLE.  We reconstruct DDL
@@ -389,7 +387,7 @@ class SQLServerAdapter(AbstractBaseAdapter):
         columns = await self.get_columns(table_name, schema=sch)
         indexes = await self.get_indexes(table_name, schema=sch)
 
-        lines: List[str] = []
+        lines: list[str] = []
         for col in columns:
             parts = [f"    [{col.name}] {col.data_type}"]
             if not col.nullable:
@@ -425,8 +423,8 @@ class SQLServerAdapter(AbstractBaseAdapter):
     async def get_table_ddl(
         self,
         table_name: str,
-        database: Optional[str] = None,
-        schema: Optional[str] = None,
+        database: str | None = None,
+        schema: str | None = None,
     ) -> str:
         return await self.get_create_table_sql(table_name, database=database, schema=schema)
 
@@ -437,8 +435,8 @@ class SQLServerAdapter(AbstractBaseAdapter):
     async def get_table_stats(
         self,
         table_name: str,
-        database: Optional[str] = None,
-        schema: Optional[str] = None,
+        database: str | None = None,
+        schema: str | None = None,
     ) -> TableStats:
         sch = self._default_schema(schema) or "dbo"
         sql = """

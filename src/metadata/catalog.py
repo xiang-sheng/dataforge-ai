@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 DataForge AI - Data catalog service.
 
@@ -10,13 +9,12 @@ dictionary generation.
 from __future__ import annotations
 
 import logging
-import re
 import uuid
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime
-from enum import Enum
-from typing import Any, Dict, List, Optional, Set
+from enum import Enum, StrEnum
+from typing import Any
 
 from src.ai.provider import BaseAIProvider, ChatMessage
 
@@ -27,7 +25,7 @@ logger = logging.getLogger(__name__)
 # Enums
 # ---------------------------------------------------------------------------
 
-class TableCategory(str, Enum):
+class TableCategory(StrEnum):
     """Business category classifications for tables."""
 
     FACT = "fact"
@@ -39,7 +37,7 @@ class TableCategory(str, Enum):
     OTHER = "other"
 
 
-class DataSensitivity(str, Enum):
+class DataSensitivity(StrEnum):
     """Data sensitivity / classification levels."""
 
     PUBLIC = "public"
@@ -48,7 +46,7 @@ class DataSensitivity(str, Enum):
     RESTRICTED = "restricted"
 
 
-class ColumnRole(str, Enum):
+class ColumnRole(StrEnum):
     """Semantic role of a column within a table."""
 
     PRIMARY_KEY = "primary_key"
@@ -62,7 +60,7 @@ class ColumnRole(str, Enum):
     DERIVED = "derived"
 
 
-class CatalogEntryStatus(str, Enum):
+class CatalogEntryStatus(StrEnum):
     """Lifecycle status of a catalog entry."""
 
     ACTIVE = "active"
@@ -96,10 +94,10 @@ class ColumnMetadata:
     description: str = ""
     role: ColumnRole = ColumnRole.ATTRIBUTE
     nullable: bool = True
-    sample_values: List[str] = field(default_factory=list)
+    sample_values: list[str] = field(default_factory=list)
     sensitivity: DataSensitivity = DataSensitivity.INTERNAL
-    tags: List[str] = field(default_factory=list)
-    statistics: Dict[str, Any] = field(default_factory=dict)
+    tags: list[str] = field(default_factory=list)
+    statistics: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -139,22 +137,22 @@ class TableMetadata:
     description: str = ""
     category: TableCategory = TableCategory.OTHER
     layer: str = ""
-    columns: List[ColumnMetadata] = field(default_factory=list)
-    primary_keys: List[str] = field(default_factory=list)
-    foreign_keys: List[tuple[str, str, str]] = field(default_factory=list)
+    columns: list[ColumnMetadata] = field(default_factory=list)
+    primary_keys: list[str] = field(default_factory=list)
+    foreign_keys: list[tuple[str, str, str]] = field(default_factory=list)
     row_count: int = 0
     size_bytes: int = 0
-    partition_columns: List[str] = field(default_factory=list)
-    tags: List[str] = field(default_factory=list)
+    partition_columns: list[str] = field(default_factory=list)
+    tags: list[str] = field(default_factory=list)
     owner: str = ""
     sensitivity: DataSensitivity = DataSensitivity.INTERNAL
     status: CatalogEntryStatus = CatalogEntryStatus.ACTIVE
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
-    last_profiled_at: Optional[datetime] = None
-    custom_properties: Dict[str, str] = field(default_factory=dict)
-    upstream_tables: List[str] = field(default_factory=list)
-    downstream_tables: List[str] = field(default_factory=list)
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+    last_profiled_at: datetime | None = None
+    custom_properties: dict[str, str] = field(default_factory=dict)
+    upstream_tables: list[str] = field(default_factory=list)
+    downstream_tables: list[str] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         if not self.table_id:
@@ -184,7 +182,7 @@ class SearchResult:
 
     entry: TableMetadata
     score: float = 0.0
-    matched_fields: List[str] = field(default_factory=list)
+    matched_fields: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -201,8 +199,8 @@ class DataDictionary:
 
     connection_id: str
     generated_at: datetime = field(default_factory=datetime.utcnow)
-    tables: List[TableMetadata] = field(default_factory=list)
-    summary: Dict[str, Any] = field(default_factory=dict)
+    tables: list[TableMetadata] = field(default_factory=list)
+    summary: dict[str, Any] = field(default_factory=dict)
     content: str = ""
 
 
@@ -244,9 +242,9 @@ class DataCatalog:
 
     def __init__(self, provider: BaseAIProvider) -> None:
         self._provider = provider
-        self._entries: Dict[str, TableMetadata] = {}  # table_id -> metadata
-        self._index_by_name: Dict[str, str] = {}  # full_name -> table_id
-        self._index_by_connection: Dict[str, List[str]] = defaultdict(list)
+        self._entries: dict[str, TableMetadata] = {}  # table_id -> metadata
+        self._index_by_name: dict[str, str] = {}  # full_name -> table_id
+        self._index_by_connection: dict[str, list[str]] = defaultdict(list)
 
     # -- Registration -------------------------------------------------------
 
@@ -308,9 +306,9 @@ class DataCatalog:
     def search_tables(
         self,
         keyword: str,
-        filters: Optional[Dict[str, Any]] = None,
+        filters: dict[str, Any] | None = None,
         limit: int = 50,
-    ) -> List[SearchResult]:
+    ) -> list[SearchResult]:
         """Search the catalog for tables matching a keyword and optional filters.
 
         Searches across table name, description, column names, column
@@ -327,10 +325,10 @@ class DataCatalog:
             A list of ``SearchResult`` objects sorted by relevance score.
         """
         keyword_lower = keyword.lower()
-        results: List[SearchResult] = []
+        results: list[SearchResult] = []
 
         for entry in self._entries.values():
-            matched_fields: List[str] = []
+            matched_fields: list[str] = []
             score = 0.0
 
             # Name match
@@ -365,9 +363,8 @@ class DataCatalog:
                 continue
 
             # Apply filters
-            if filters:
-                if not self._matches_filters(entry, filters):
-                    continue
+            if filters and not self._matches_filters(entry, filters):
+                continue
 
             # Normalize score to [0, 1]
             score = min(score, 1.0)
@@ -380,7 +377,7 @@ class DataCatalog:
 
     # -- Metadata retrieval -------------------------------------------------
 
-    def get_table_metadata(self, table_id: str) -> Optional[TableMetadata]:
+    def get_table_metadata(self, table_id: str) -> TableMetadata | None:
         """Retrieve full metadata for a table by its catalog ID.
 
         Args:
@@ -396,7 +393,7 @@ class DataCatalog:
         connection_id: str,
         schema_name: str,
         table_name: str,
-    ) -> Optional[TableMetadata]:
+    ) -> TableMetadata | None:
         """Retrieve metadata for a table by its fully qualified name.
 
         Args:
@@ -419,8 +416,8 @@ class DataCatalog:
     def update_metadata(
         self,
         table_id: str,
-        changes: Dict[str, Any],
-    ) -> Optional[TableMetadata]:
+        changes: dict[str, Any],
+    ) -> TableMetadata | None:
         """Update specific fields of a catalog entry.
 
         Args:
@@ -499,7 +496,7 @@ class DataCatalog:
         ))
 
         # Build summary
-        layer_counts: Dict[str, int] = defaultdict(int)
+        layer_counts: dict[str, int] = defaultdict(int)
         total_columns = 0
         for t in tables:
             layer_counts[t.layer or "unknown"] += 1
@@ -531,7 +528,7 @@ class DataCatalog:
     async def auto_tag_tables(
         self,
         table_info: TableMetadata,
-    ) -> List[str]:
+    ) -> list[str]:
         """Use AI to suggest tags for a table based on its metadata.
 
         Analyzes the table name, description, column names, and column
@@ -595,7 +592,7 @@ class DataCatalog:
     async def auto_tag_and_apply(
         self,
         table_id: str,
-    ) -> List[str]:
+    ) -> list[str]:
         """Generate and apply AI tags to an existing catalog entry.
 
         Args:
@@ -629,17 +626,17 @@ class DataCatalog:
 
     # -- Catalog statistics -------------------------------------------------
 
-    def get_catalog_statistics(self) -> Dict[str, Any]:
+    def get_catalog_statistics(self) -> dict[str, Any]:
         """Return overall catalog statistics.
 
         Returns:
             A dict with total tables, columns, layer distribution, etc.
         """
         total_columns = 0
-        layer_counts: Dict[str, int] = defaultdict(int)
-        category_counts: Dict[str, int] = defaultdict(int)
-        connection_counts: Dict[str, int] = defaultdict(int)
-        tag_counts: Dict[str, int] = defaultdict(int)
+        layer_counts: dict[str, int] = defaultdict(int)
+        category_counts: dict[str, int] = defaultdict(int)
+        connection_counts: dict[str, int] = defaultdict(int)
+        tag_counts: dict[str, int] = defaultdict(int)
 
         for entry in self._entries.values():
             total_columns += len(entry.columns)
@@ -666,7 +663,7 @@ class DataCatalog:
     @staticmethod
     def _matches_filters(
         entry: TableMetadata,
-        filters: Dict[str, Any],
+        filters: dict[str, Any],
     ) -> bool:
         """Check if an entry matches all specified filters."""
         for key, expected in filters.items():
@@ -683,28 +680,28 @@ class DataCatalog:
 
     @staticmethod
     def _render_markdown_dictionary(
-        tables: List[TableMetadata],
-        summary: Dict[str, Any],
+        tables: list[TableMetadata],
+        summary: dict[str, Any],
         connection_id: str,
     ) -> str:
         """Render the data dictionary as a Markdown document."""
-        lines: List[str] = [
-            f"# Data Dictionary",
-            f"",
+        lines: list[str] = [
+            "# Data Dictionary",
+            "",
             f"**Connection:** {connection_id}",
             f"**Generated:** {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}",
-            f"",
-            f"## Summary",
-            f"",
-            f"| Metric | Value |",
-            f"|--------|-------|",
+            "",
+            "## Summary",
+            "",
+            "| Metric | Value |",
+            "|--------|-------|",
             f"| Total Tables | {summary['total_tables']} |",
             f"| Total Columns | {summary['total_columns']} |",
-            f"",
-            f"### Layer Distribution",
-            f"",
-            f"| Layer | Tables |",
-            f"|-------|--------|",
+            "",
+            "### Layer Distribution",
+            "",
+            "| Layer | Tables |",
+            "|-------|--------|",
         ]
 
         for layer, count in sorted(summary.get("layer_distribution", {}).items()):
@@ -715,7 +712,7 @@ class DataCatalog:
         lines.append("")
 
         # Group by layer
-        by_layer: Dict[str, List[TableMetadata]] = defaultdict(list)
+        by_layer: dict[str, list[TableMetadata]] = defaultdict(list)
         for t in tables:
             by_layer[t.layer or "other"].append(t)
 
@@ -738,8 +735,8 @@ class DataCatalog:
                 lines.append("")
 
                 if table.columns:
-                    lines.append(f"| Column | Type | Nullable | Description |")
-                    lines.append(f"|--------|------|----------|-------------|")
+                    lines.append("| Column | Type | Nullable | Description |")
+                    lines.append("|--------|------|----------|-------------|")
                     for col in table.columns:
                         nullable = "Yes" if col.nullable else "No"
                         lines.append(
@@ -755,12 +752,12 @@ class DataCatalog:
 
     @staticmethod
     def _render_html_dictionary(
-        tables: List[TableMetadata],
-        summary: Dict[str, Any],
+        tables: list[TableMetadata],
+        summary: dict[str, Any],
         connection_id: str,
     ) -> str:
         """Render the data dictionary as an HTML document."""
-        rows_html: List[str] = []
+        rows_html: list[str] = []
         for table in tables:
             for col in table.columns:
                 rows_html.append(

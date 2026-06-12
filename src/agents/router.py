@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from src.agents.base import ManagedAgent
-from src.agents.registry import AgentRegistry
+if TYPE_CHECKING:
+    from src.agents.registry import AgentRegistry
 
 logger = logging.getLogger(__name__)
 

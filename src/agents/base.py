@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any, ClassVar
 
 
 @dataclass
@@ -14,7 +14,7 @@ class AgentResult:
     content: str
     metadata: dict[str, Any] = field(default_factory=dict)
     success: bool = True
-    error: Optional[str] = None
+    error: str | None = None
 
 
 class ManagedAgent(ABC):
@@ -28,7 +28,7 @@ class ManagedAgent(ABC):
 
     name: str = ""
     description: str = ""
-    intent_keywords: list[str] = []
+    intent_keywords: ClassVar[list[str]] = []
 
     @abstractmethod
     def process(self, message: str, context: dict[str, Any] | None = None) -> AgentResult:

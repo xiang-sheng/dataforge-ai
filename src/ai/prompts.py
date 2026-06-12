@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 DataForge AI - Prompt templates for AI-assisted data warehouse operations.
 
@@ -11,8 +10,7 @@ customized at runtime via keyword overrides.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
-
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # Template container
@@ -38,10 +36,10 @@ class PromptTemplate:
     description: str
     system_prompt: str
     user_template: str
-    examples: List[Dict[str, str]] = field(default_factory=list)
-    variables: List[str] = field(default_factory=list)
+    examples: list[dict[str, str]] = field(default_factory=list)
+    variables: list[str] = field(default_factory=list)
 
-    def render(self, **kwargs: Any) -> Dict[str, str]:
+    def render(self, **kwargs: Any) -> dict[str, str]:
         """Render the template with the supplied variables.
 
         Args:
@@ -539,7 +537,7 @@ class PromptRegistry:
     """
 
     def __init__(self) -> None:
-        self._templates: Dict[str, PromptTemplate] = {}
+        self._templates: dict[str, PromptTemplate] = {}
         self._register_defaults()
 
     def _register_defaults(self) -> None:
@@ -586,11 +584,11 @@ class PromptRegistry:
         """
         self._templates[template.name] = template
 
-    def list_templates(self) -> List[str]:
+    def list_templates(self) -> list[str]:
         """Return a sorted list of all registered template names."""
         return sorted(self._templates.keys())
 
-    def render(self, name: str, **kwargs: Any) -> Dict[str, str]:
+    def render(self, name: str, **kwargs: Any) -> dict[str, str]:
         """Convenience method: look up a template and render it in one call.
 
         Args:

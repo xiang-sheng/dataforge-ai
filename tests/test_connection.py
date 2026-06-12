@@ -7,11 +7,12 @@ connection testing, database/table/column introspection, and error handling.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pytest
-import pytest_asyncio
-from httpx import AsyncClient
+
+if TYPE_CHECKING:
+    from httpx import AsyncClient
 
 BASE = "/api/v1/connections"
 

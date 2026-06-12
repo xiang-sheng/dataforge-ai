@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Custom exception hierarchy for DataForge AI.
 
@@ -13,7 +12,7 @@ parsing human-readable messages.
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any
 
 
 class DataForgeError(Exception):
@@ -38,17 +37,17 @@ class DataForgeError(Exception):
     def __init__(
         self,
         message: str = "An unexpected error occurred.",
-        code: Optional[str] = None,
-        details: Optional[Dict[str, Any]] = None,
+        code: str | None = None,
+        details: dict[str, Any] | None = None,
     ) -> None:
         self.message = message
         self.code = code or self.default_code
         self.details = details or {}
         super().__init__(self.message)
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialise the exception into a JSON-friendly dict for API responses."""
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "error": {
                 "code": self.code,
                 "message": self.message,
@@ -85,8 +84,8 @@ class ConnectionError(DataForgeError):
     def __init__(
         self,
         message: str = "Failed to connect to the target database.",
-        code: Optional[str] = None,
-        details: Optional[Dict[str, Any]] = None,
+        code: str | None = None,
+        details: dict[str, Any] | None = None,
     ) -> None:
         super().__init__(message=message, code=code, details=details)
 
@@ -99,8 +98,8 @@ class ConnectionTimeoutError(ConnectionError):
     def __init__(
         self,
         message: str = "Connection attempt timed out.",
-        code: Optional[str] = None,
-        details: Optional[Dict[str, Any]] = None,
+        code: str | None = None,
+        details: dict[str, Any] | None = None,
     ) -> None:
         super().__init__(message=message, code=code, details=details)
 
@@ -113,8 +112,8 @@ class ConnectionPoolExhaustedError(ConnectionError):
     def __init__(
         self,
         message: str = "All connections in the pool are in use.",
-        code: Optional[str] = None,
-        details: Optional[Dict[str, Any]] = None,
+        code: str | None = None,
+        details: dict[str, Any] | None = None,
     ) -> None:
         super().__init__(message=message, code=code, details=details)
 
@@ -138,10 +137,10 @@ class QueryExecutionError(DataForgeError):
     def __init__(
         self,
         message: str = "Query execution failed.",
-        code: Optional[str] = None,
-        details: Optional[Dict[str, Any]] = None,
-        sql: Optional[str] = None,
-        native_error_code: Optional[int] = None,
+        code: str | None = None,
+        details: dict[str, Any] | None = None,
+        sql: str | None = None,
+        native_error_code: int | None = None,
     ) -> None:
         _details = details or {}
         if sql:
@@ -160,8 +159,8 @@ class QueryTimeoutError(QueryExecutionError):
     def __init__(
         self,
         message: str = "Query execution timed out.",
-        code: Optional[str] = None,
-        details: Optional[Dict[str, Any]] = None,
+        code: str | None = None,
+        details: dict[str, Any] | None = None,
     ) -> None:
         super().__init__(message=message, code=code, details=details)
 
@@ -187,8 +186,8 @@ class AIGenerationError(DataForgeError):
     def __init__(
         self,
         message: str = "AI generation request failed.",
-        code: Optional[str] = None,
-        details: Optional[Dict[str, Any]] = None,
+        code: str | None = None,
+        details: dict[str, Any] | None = None,
     ) -> None:
         super().__init__(message=message, code=code, details=details)
 
@@ -201,8 +200,8 @@ class AIParsingError(AIGenerationError):
     def __init__(
         self,
         message: str = "Failed to parse AI model response.",
-        code: Optional[str] = None,
-        details: Optional[Dict[str, Any]] = None,
+        code: str | None = None,
+        details: dict[str, Any] | None = None,
     ) -> None:
         super().__init__(message=message, code=code, details=details)
 
@@ -228,9 +227,9 @@ class SchemaValidationError(DataForgeError):
     def __init__(
         self,
         message: str = "Schema validation failed.",
-        code: Optional[str] = None,
-        details: Optional[Dict[str, Any]] = None,
-        field_errors: Optional[Dict[str, str]] = None,
+        code: str | None = None,
+        details: dict[str, Any] | None = None,
+        field_errors: dict[str, str] | None = None,
     ) -> None:
         _details = details or {}
         if field_errors:
@@ -259,10 +258,10 @@ class WarehouseLayerError(DataForgeError):
     def __init__(
         self,
         message: str = "Data warehouse layer constraint violated.",
-        code: Optional[str] = None,
-        details: Optional[Dict[str, Any]] = None,
-        source_layer: Optional[str] = None,
-        target_layer: Optional[str] = None,
+        code: str | None = None,
+        details: dict[str, Any] | None = None,
+        source_layer: str | None = None,
+        target_layer: str | None = None,
     ) -> None:
         _details = details or {}
         if source_layer:
@@ -286,9 +285,9 @@ class ETLPipelineError(DataForgeError):
     def __init__(
         self,
         message: str = "ETL pipeline execution failed.",
-        code: Optional[str] = None,
-        details: Optional[Dict[str, Any]] = None,
-        task_id: Optional[str] = None,
+        code: str | None = None,
+        details: dict[str, Any] | None = None,
+        task_id: str | None = None,
     ) -> None:
         _details = details or {}
         if task_id:
@@ -314,10 +313,10 @@ class ResourceNotFoundError(DataForgeError):
     def __init__(
         self,
         message: str = "Requested resource not found.",
-        code: Optional[str] = None,
-        details: Optional[Dict[str, Any]] = None,
-        resource_type: Optional[str] = None,
-        resource_id: Optional[str] = None,
+        code: str | None = None,
+        details: dict[str, Any] | None = None,
+        resource_type: str | None = None,
+        resource_id: str | None = None,
     ) -> None:
         _details = details or {}
         if resource_type:

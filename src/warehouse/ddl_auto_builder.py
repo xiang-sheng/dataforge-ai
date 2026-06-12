@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 DataForge AI - Automated DDL and computation SQL generation engine.
 
@@ -37,23 +36,22 @@ from __future__ import annotations
 import logging
 import re
 import textwrap
-from datetime import datetime
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.core.schemas import (
-    ColumnDataType,
-    ColumnInfo,
-    DatabaseType,
-    TableSchema,
-)
 from src.warehouse.layers import (
     DEFAULT_LAYER_CONFIGS,
     LayerConfig,
     LayerValidator,
     WarehouseLayer,
 )
+
+if TYPE_CHECKING:
+    from src.core.schemas import (
+        ColumnInfo,
+        TableSchema,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -83,8 +81,8 @@ except ImportError:  # pragma: no cover
 try:
     from src.ai.provider import (
         AIProviderFactory,
-        BaseAIProvider,
-        ChatMessage,
+        BaseAIProvider,  # noqa: F401
+        ChatMessage,  # noqa: F401
         ProviderConfig,
     )
     _HAS_AI_PROVIDER = True
@@ -93,10 +91,12 @@ except ImportError:  # pragma: no cover
 
 try:
     from src.ai.prompts import (
-        DDL_GENERATION_TEMPLATE,
-        SCHEMA_REVIEW_TEMPLATE,
-        PromptRegistry,
-        default_registry as prompt_registry,
+        DDL_GENERATION_TEMPLATE,  # noqa: F401
+        SCHEMA_REVIEW_TEMPLATE,  # noqa: F401
+        PromptRegistry,  # noqa: F401
+    )
+    from src.ai.prompts import (
+        default_registry as prompt_registry,  # noqa: F401
     )
     _HAS_PROMPTS = True
 except ImportError:  # pragma: no cover
@@ -109,7 +109,7 @@ except ImportError:  # pragma: no cover
 
 # Mapping from logical ColumnDataType to engine-specific type strings.
 # Keys are upper-case logical type names; values map engine -> SQL type.
-_TYPE_MAP: Dict[str, Dict[str, str]] = {
+_TYPE_MAP: dict[str, dict[str, str]] = {
     "STRING": {
         "clickhouse": "String",
         "hive": "STRING",
@@ -212,7 +212,7 @@ _TYPE_MAP: Dict[str, Dict[str, str]] = {
 _DUCKDB_TYPE_FALLBACK = "VARCHAR"
 
 # Layer-specific suffix conventions (used when no convention file is loaded).
-_LAYER_SUFFIX: Dict[str, str] = {
+_LAYER_SUFFIX: dict[str, str] = {
     "ODS": "",
     "DWD": "_di",   # daily increment
     "DWS": "_1d",   # 1-day aggregation
@@ -223,7 +223,7 @@ _LAYER_SUFFIX: Dict[str, str] = {
 
 # Domain prefix mapping -- a naive heuristic based on table name keywords.
 # The convention file, when loaded, overrides this entirely.
-_DOMAIN_KEYWORDS: Dict[str, str] = {
+_DOMAIN_KEYWORDS: dict[str, str] = {
     "order": "trade",
     "trade": "trade",
     "pay": "trade",
@@ -266,7 +266,7 @@ class ColumnMapping(BaseModel):
     target_type: str = Field(
         ..., description="Engine-specific data type in the target table."
     )
-    transformation: Optional[str] = Field(
+    transformation: str | None = Field(
         default=None,
         description=(
             "SQL expression applied to the source value during INSERT INTO ... "
@@ -287,17 +287,17 @@ class ColumnMapping(BaseModel):
 class AIEnhanceResult(BaseModel):
     """Output of the optional LLM review / enhancement step."""
 
-    enhanced_ddl: Optional[str] = Field(
+    enhanced_ddl: str | None = Field(
         default=None, description="LLM-improved DDL, or ``None`` if unchanged."
     )
-    enhanced_sql: Optional[str] = Field(
+    enhanced_sql: str | None = Field(
         default=None, description="LLM-improved computation SQL, or ``None``."
     )
-    suggestions: List[str] = Field(
+    suggestions: list[str] = Field(
         default_factory=list,
         description="Actionable suggestions the LLM produced.",
     )
-    warnings: List[str] = Field(
+    warnings: list[str] = Field(
         default_factory=list,
         description="Potential issues the LLM flagged.",
     )
@@ -319,7 +319,7 @@ class DDLPipelineConfig(BaseModel):
     source_connection_id: str = Field(
         ..., description="Connection ID of the source database to read metadata from."
     )
-    source_tables: List[str] = Field(
+    source_tables: list[str] = Field(
         default_factory=list,
         description=(
             "Specific source table names to process.  An empty list means "
@@ -338,11 +338,11 @@ class DDLPipelineConfig(BaseModel):
             "clickhouse, hive, doris, mysql, postgresql, duckdb."
         ),
     )
-    convention_path: Optional[str] = Field(
+    convention_path: str | None = Field(
         default=None,
         description="Path to a YAML or Markdown convention file.  ``None`` uses built-in defaults.",
     )
-    naming_overrides: Dict[str, str] = Field(
+    naming_overrides: dict[str, str] = Field(
         default_factory=dict,
         description=(
             "Manual naming overrides keyed by source table name.  When a "
@@ -381,23 +381,23 @@ class GeneratedTable(BaseModel):
     target_table: str = Field(..., description="Generated target table name.")
     target_layer: str = Field(..., description="Warehouse layer the target belongs to.")
     ddl: str = Field(..., description="The CREATE TABLE statement for the target engine.")
-    computation_sql: Optional[str] = Field(
+    computation_sql: str | None = Field(
         default=None,
         description="INSERT INTO target SELECT ... FROM source statement, or ``None``.",
     )
-    convention_violations: List[Dict[str, Any]] = Field(
+    convention_violations: list[dict[str, Any]] = Field(
         default_factory=list,
         description="Convention violations that were detected and auto-corrected.",
     )
-    verify_result: Optional[Dict[str, Any]] = Field(
+    verify_result: dict[str, Any] | None = Field(
         default=None,
         description="DuckDB sandbox verification result when ``local_verify=True``.",
     )
-    column_mappings: List[Dict[str, Any]] = Field(
+    column_mappings: list[dict[str, Any]] = Field(
         default_factory=list,
         description="List of source_col -> target_col mapping dictionaries.",
     )
-    ai_enhance_result: Optional[Dict[str, Any]] = Field(
+    ai_enhance_result: dict[str, Any] | None = Field(
         default=None,
         description="LLM-based AI enhancement result (suggestions, warnings), or ``None``.",
     )
@@ -409,21 +409,21 @@ class DDLPipelineResult(BaseModel):
     config: DDLPipelineConfig = Field(
         ..., description="The configuration that produced this result."
     )
-    tables: List[GeneratedTable] = Field(
+    tables: list[GeneratedTable] = Field(
         default_factory=list, description="Per-table generation results."
     )
     total_tables: int = Field(default=0, description="Total tables processed.")
     succeeded: int = Field(default=0, description="Tables generated successfully.")
     failed: int = Field(default=0, description="Tables that failed generation.")
-    convention_summary: Optional[Dict[str, Any]] = Field(
+    convention_summary: dict[str, Any] | None = Field(
         default=None,
         description="Summary of convention rules applied.",
     )
-    verify_summary: Optional[Dict[str, Any]] = Field(
+    verify_summary: dict[str, Any] | None = Field(
         default=None,
         description="Aggregated DuckDB verification summary.",
     )
-    errors: List[str] = Field(
+    errors: list[str] = Field(
         default_factory=list, description="Top-level error messages."
     )
 
@@ -591,8 +591,8 @@ class DDLAutoBuilder:
 
     def __init__(self, config: DDLPipelineConfig) -> None:
         self.config = config
-        self._convention: Optional[Any] = None  # TableConvention when available
-        self._sandbox: Optional[Any] = None  # DuckDBSandbox when available
+        self._convention: Any | None = None  # TableConvention when available
+        self._sandbox: Any | None = None  # DuckDBSandbox when available
         self._layer_validator = LayerValidator()
         self._target_layer = _normalise_layer_name(config.target_layer)
         self._target_engine = config.target_db_type.lower()
@@ -612,7 +612,7 @@ class DDLAutoBuilder:
     # Main entry point
     # ------------------------------------------------------------------ #
 
-    async def build(self, source_schemas: List[TableSchema]) -> DDLPipelineResult:
+    async def build(self, source_schemas: list[TableSchema]) -> DDLPipelineResult:
         """Execute the full generation pipeline.
 
         Parameters
@@ -633,8 +633,8 @@ class DDLAutoBuilder:
             len(source_schemas),
         )
 
-        tables: List[GeneratedTable] = []
-        errors: List[str] = []
+        tables: list[GeneratedTable] = []
+        errors: list[str] = []
         succeeded = 0
         failed = 0
 
@@ -650,12 +650,12 @@ class DDLAutoBuilder:
                 failed += 1
 
         # Optional DuckDB verification (batch)
-        verify_summary: Optional[Dict[str, Any]] = None
+        verify_summary: dict[str, Any] | None = None
         if self.config.local_verify and _HAS_DUCKDB_SANDBOX:
             verify_summary = self._verify_all(tables, source_schemas)
 
         # Convention summary
-        convention_summary: Optional[Dict[str, Any]] = None
+        convention_summary: dict[str, Any] | None = None
         if self._convention is not None:
             convention_summary = {
                 "source": self.config.convention_path or "built-in defaults",
@@ -776,7 +776,7 @@ class DDLAutoBuilder:
         logger.debug("Built-in naming: %s + %s -> %s", source_table, layer_upper, target)
         return target
 
-    def _apply_naming_convention(self, source_table: str, layer_upper: str) -> Optional[str]:
+    def _apply_naming_convention(self, source_table: str, layer_upper: str) -> str | None:
         """Construct a target table name from the loaded convention's naming rules.
 
         Reads the ``NamingConvention`` fields (``table_pattern``,
@@ -791,8 +791,8 @@ class DDLAutoBuilder:
             return None
 
         table_pattern: str = getattr(naming, "table_pattern", "") or ""
-        prefix_rules: Dict[str, str] = getattr(naming, "prefix_rules", {}) or {}
-        suffix_rules: Dict[str, str] = getattr(naming, "suffix_rules", {}) or {}
+        prefix_rules: dict[str, str] = getattr(naming, "prefix_rules", {}) or {}
+        suffix_rules: dict[str, str] = getattr(naming, "suffix_rules", {}) or {}
         case_style: str = getattr(naming, "case_style", "snake_case") or "snake_case"
 
         if not table_pattern:
@@ -835,10 +835,10 @@ class DDLAutoBuilder:
 
     def map_columns(
         self,
-        source_columns: List[ColumnInfo],
+        source_columns: list[ColumnInfo],
         target_engine: str,
         layer: str = "",
-    ) -> List[ColumnMapping]:
+    ) -> list[ColumnMapping]:
         """Map source columns to target columns with type conversion.
 
         For each source column the method:
@@ -864,7 +864,7 @@ class DDLAutoBuilder:
             Ordered list of column mappings ready for DDL and SQL generation.
         """
         layer_upper = _normalise_layer_name(layer or self._target_layer)
-        mappings: List[ColumnMapping] = []
+        mappings: list[ColumnMapping] = []
 
         for col in source_columns:
             logical = _resolve_logical_type(col)
@@ -950,7 +950,7 @@ class DDLAutoBuilder:
     def generate_ddl(
         self,
         target_table: str,
-        columns: List[ColumnMapping],
+        columns: list[ColumnMapping],
         layer: str,
         engine: str,
     ) -> str:
@@ -989,26 +989,22 @@ class DDLAutoBuilder:
 
         # Resolve storage settings from layer config
         layer_enum = self._resolve_layer_enum(layer_upper)
-        layer_cfg: Optional[LayerConfig] = DEFAULT_LAYER_CONFIGS.get(layer_enum)
+        layer_cfg: LayerConfig | None = DEFAULT_LAYER_CONFIGS.get(layer_enum)
         storage_format = layer_cfg.storage_format if layer_cfg else "Parquet"
-        compression = layer_cfg.compression if layer_cfg else "snappy"
         table_comment = f"{layer_upper} layer table for {target_table}"
 
-        lines: List[str] = []
+        lines: list[str] = []
         lines.append(f"CREATE TABLE IF NOT EXISTS {target_table} (")
 
-        col_defs: List[str] = []
+        col_defs: list[str] = []
         for cm in regular_cols:
             parts = [f"    {cm.target_column:<30s} {cm.target_type}"]
-            if cm.is_primary_key:
+            if cm.is_primary_key and engine_lower in ("mysql", "postgresql", "duckdb"):
                 # Some engines handle PK inline
-                if engine_lower in ("mysql", "postgresql", "duckdb"):
-                    pass  # PK declared at table level
+                pass  # PK declared at table level
             if cm.comment:
                 safe_comment = cm.comment.replace("'", "''")
-                if engine_lower in ("hive", "clickhouse"):
-                    parts.append(f"COMMENT '{safe_comment}'")
-                elif engine_lower in ("mysql",):
+                if engine_lower in ("hive", "clickhouse") or engine_lower in ("mysql",):
                     parts.append(f"COMMENT '{safe_comment}'")
                 # PostgreSQL / DuckDB use COMMENT ON COLUMN after CREATE TABLE
             col_defs.append(" ".join(parts))
@@ -1018,21 +1014,19 @@ class DDLAutoBuilder:
 
         # Table comment
         safe_table_comment = table_comment.replace("'", "''")
-        if engine_lower in ("hive", "clickhouse", "mysql"):
-            lines.append(f"COMMENT '{safe_table_comment}'")
-        elif engine_lower == "doris":
+        if engine_lower in ("hive", "clickhouse", "mysql") or engine_lower == "doris":
             lines.append(f"COMMENT '{safe_table_comment}'")
 
         # Engine-specific clauses
         if engine_lower == "clickhouse":
             pk_cols = [c.target_column for c in regular_cols if c.is_primary_key]
             order_by = ", ".join(pk_cols) if pk_cols else regular_cols[0].target_column if regular_cols else "tuple()"
-            lines.append(f"ENGINE = MergeTree()")
+            lines.append("ENGINE = MergeTree()")
             lines.append(f"ORDER BY ({order_by})")
             if partition_cols:
                 pk_names = ", ".join(c.target_column for c in partition_cols)
                 lines.append(f"PARTITION BY ({pk_names})")
-            lines.append(f"SETTINGS storage_policy = 'default'")
+            lines.append("SETTINGS storage_policy = 'default'")
 
         elif engine_lower == "hive":
             if partition_cols:
@@ -1051,20 +1045,15 @@ class DDLAutoBuilder:
                 pk_names = ", ".join(c.target_column for c in partition_cols)
                 lines.append(f"PARTITION BY LIST({pk_names})()")
             lines.append(f"DISTRIBUTED BY HASH({regular_cols[0].target_column if regular_cols else 'id'}) BUCKETS 10")
-            lines.append(f'PROPERTIES ("replication_num" = "1")')
+            lines.append('PROPERTIES ("replication_num" = "1")')
 
         elif engine_lower == "mysql":
             pk_cols = [c.target_column for c in regular_cols if c.is_primary_key]
             if pk_cols:
                 lines.append(f"PRIMARY KEY ({', '.join(pk_cols)})")
-            lines.append(f"ENGINE=InnoDB DEFAULT CHARSET=utf8mb4")
+            lines.append("ENGINE=InnoDB DEFAULT CHARSET=utf8mb4")
 
-        elif engine_lower == "postgresql":
-            pk_cols = [c.target_column for c in regular_cols if c.is_primary_key]
-            if pk_cols:
-                lines.append(f"PRIMARY KEY ({', '.join(pk_cols)})")
-
-        elif engine_lower == "duckdb":
+        elif engine_lower == "postgresql" or engine_lower == "duckdb":
             pk_cols = [c.target_column for c in regular_cols if c.is_primary_key]
             if pk_cols:
                 lines.append(f"PRIMARY KEY ({', '.join(pk_cols)})")
@@ -1091,7 +1080,7 @@ class DDLAutoBuilder:
         self,
         source_table: str,
         target_table: str,
-        column_mappings: List[ColumnMapping],
+        column_mappings: list[ColumnMapping],
         layer: str,
     ) -> str:
         """Generate INSERT INTO ... SELECT computation SQL.
@@ -1123,7 +1112,7 @@ class DDLAutoBuilder:
         regular_cols = [c for c in column_mappings if not c.is_partition_key]
         partition_cols = [c for c in column_mappings if c.is_partition_key]
 
-        target_col_list = ", ".join(c.target_column for c in column_mappings)
+        ", ".join(c.target_column for c in column_mappings)
 
         if layer_upper == "ODS":
             return self._gen_ods_sql(source_table, target_table, regular_cols, partition_cols)
@@ -1143,11 +1132,11 @@ class DDLAutoBuilder:
         self,
         source_table: str,
         target_table: str,
-        regular_cols: List[ColumnMapping],
-        partition_cols: List[ColumnMapping],
+        regular_cols: list[ColumnMapping],
+        partition_cols: list[ColumnMapping],
     ) -> str:
         """Generate ODS computation SQL -- simple SELECT with ETL timestamp."""
-        select_parts: List[str] = []
+        select_parts: list[str] = []
         for cm in regular_cols:
             if cm.transformation:
                 select_parts.append(f"{cm.transformation} AS {cm.target_column}")
@@ -1179,11 +1168,11 @@ class DDLAutoBuilder:
         self,
         source_table: str,
         target_table: str,
-        regular_cols: List[ColumnMapping],
-        partition_cols: List[ColumnMapping],
+        regular_cols: list[ColumnMapping],
+        partition_cols: list[ColumnMapping],
     ) -> str:
         """Generate DWD computation SQL -- cleansing, dedup, standardisation."""
-        select_parts: List[str] = []
+        select_parts: list[str] = []
         for cm in regular_cols:
             if cm.transformation:
                 select_parts.append(f"{cm.transformation} AS {cm.target_column}")
@@ -1228,14 +1217,14 @@ class DDLAutoBuilder:
         self,
         source_table: str,
         target_table: str,
-        regular_cols: List[ColumnMapping],
-        partition_cols: List[ColumnMapping],
+        regular_cols: list[ColumnMapping],
+        partition_cols: list[ColumnMapping],
     ) -> str:
         """Generate DWS computation SQL -- aggregation with GROUP BY."""
         # Heuristic: first non-metric column is the grouping dimension,
         # remaining numeric columns are aggregated.
-        group_cols: List[ColumnMapping] = []
-        metric_cols: List[ColumnMapping] = []
+        group_cols: list[ColumnMapping] = []
+        metric_cols: list[ColumnMapping] = []
 
         for cm in regular_cols:
             if cm.is_primary_key or cm.target_column in ("row_key", "etl_time"):
@@ -1250,7 +1239,7 @@ class DDLAutoBuilder:
         if not group_cols and regular_cols:
             group_cols = [regular_cols[0]]
 
-        select_parts: List[str] = []
+        select_parts: list[str] = []
         for gc in group_cols:
             select_parts.append(f"s.{gc.target_column}")
         for mc in metric_cols:
@@ -1284,11 +1273,11 @@ class DDLAutoBuilder:
         self,
         source_table: str,
         target_table: str,
-        regular_cols: List[ColumnMapping],
-        partition_cols: List[ColumnMapping],
+        regular_cols: list[ColumnMapping],
+        partition_cols: list[ColumnMapping],
     ) -> str:
         """Generate ADS computation SQL -- application-specific result set."""
-        select_parts: List[str] = []
+        select_parts: list[str] = []
         for cm in regular_cols:
             select_parts.append(f"s.{cm.target_column} AS {cm.target_column}")
 
@@ -1322,7 +1311,7 @@ class DDLAutoBuilder:
         ddl: str,
         computation_sql: str,
         source_schema: TableSchema,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Verify DDL and computation SQL in a local DuckDB sandbox.
 
         The verification procedure:
@@ -1348,7 +1337,7 @@ class DDLAutoBuilder:
             A dictionary with keys: ``success`` (bool), ``rows_produced``
             (int), ``errors`` (list[str]), ``duration_ms`` (float).
         """
-        result: Dict[str, Any] = {
+        result: dict[str, Any] = {
             "success": False,
             "rows_produced": 0,
             "errors": [],
@@ -1515,7 +1504,7 @@ class DDLAutoBuilder:
         target_name = self.apply_naming(source_name, self._target_layer)
 
         # 2. Validate naming against layer conventions
-        violations: List[Dict[str, Any]] = []
+        violations: list[dict[str, Any]] = []
         layer_enum = self._resolve_layer_enum(self._target_layer)
         naming_errors = self._layer_validator.validate_table_placement(target_name, layer_enum)
         for err in naming_errors:
@@ -1533,7 +1522,7 @@ class DDLAutoBuilder:
         )
 
         # 5. Computation SQL generation
-        computation_sql: Optional[str] = None
+        computation_sql: str | None = None
         if self.config.include_computation_sql:
             # The source for computation SQL depends on the layer
             upstream_table = self._resolve_upstream_table(source_name, self._target_layer)
@@ -1542,12 +1531,12 @@ class DDLAutoBuilder:
             )
 
         # 6. DuckDB verification (per-table)
-        verify_result: Optional[Dict[str, Any]] = None
+        verify_result: dict[str, Any] | None = None
         if self.config.local_verify and _HAS_DUCKDB_SANDBOX and computation_sql:
             verify_result = self.verify_in_sandbox(ddl, computation_sql, schema)
 
         # 7. AI enhancement (optional)
-        ai_result: Optional[Dict[str, Any]] = None
+        ai_result: dict[str, Any] | None = None
         if self.config.enable_ai and _HAS_AI_PROVIDER:
             try:
                 enhance = await self.ai_enhance(schema, ddl, computation_sql or "")
@@ -1587,15 +1576,15 @@ class DDLAutoBuilder:
 
     def _verify_all(
         self,
-        tables: List[GeneratedTable],
-        source_schemas: List[TableSchema],
-    ) -> Dict[str, Any]:
+        tables: list[GeneratedTable],
+        source_schemas: list[TableSchema],
+    ) -> dict[str, Any]:
         """Run DuckDB verification for all generated tables and aggregate.
 
         Returns a summary dictionary with overall success rate and per-table
         verification outcomes.
         """
-        summary: Dict[str, Any] = {
+        summary: dict[str, Any] = {
             "total_verified": 0,
             "passed": 0,
             "failed": 0,
@@ -1603,7 +1592,7 @@ class DDLAutoBuilder:
             "per_table": {},
         }
 
-        schema_map = {s.table_name: s for s in source_schemas}
+        {s.table_name: s for s in source_schemas}
 
         for gt in tables:
             if not gt.computation_sql or not gt.verify_result:
@@ -1627,7 +1616,7 @@ class DDLAutoBuilder:
 
     def _build_source_ddl_duckdb(self, schema: TableSchema) -> str:
         """Build a CREATE TABLE DDL for the source table adapted to DuckDB."""
-        col_defs: List[str] = []
+        col_defs: list[str] = []
         for col in schema.columns:
             logical = _resolve_logical_type(col)
             duckdb_type = _map_type_duckdb(logical)
@@ -1641,7 +1630,7 @@ class DDLAutoBuilder:
         self,
         schema: TableSchema,
         count: int,
-    ) -> List[str]:
+    ) -> list[str]:
         """Generate synthetic INSERT statements for DuckDB verification.
 
         Produces *count* rows of plausible sample data based on column types.
@@ -1653,17 +1642,17 @@ class DDLAutoBuilder:
 
         col_names = [_snake_case(c.name) for c in schema.columns]
         col_list = ", ".join(col_names)
-        inserts: List[str] = []
+        inserts: list[str] = []
         batch_size = 50
         remaining = count
 
         for batch_start in range(0, count, batch_size):
             batch_count = min(batch_size, remaining)
             remaining -= batch_count
-            value_rows: List[str] = []
+            value_rows: list[str] = []
 
             for i in range(batch_count):
-                values: List[str] = []
+                values: list[str] = []
                 for col in schema.columns:
                     values.append(self._sample_value(col, batch_start + i))
                 value_rows.append(f"    ({', '.join(values)})")
@@ -1709,7 +1698,7 @@ class DDLAutoBuilder:
         return adapted
 
     @staticmethod
-    def _extract_table_name_from_ddl(ddl: str) -> Optional[str]:
+    def _extract_table_name_from_ddl(ddl: str) -> str | None:
         """Extract the table name from a CREATE TABLE DDL statement."""
         match = re.search(
             r"CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(\S+)",
@@ -1767,7 +1756,7 @@ class DDLAutoBuilder:
     # ------------------------------------------------------------------ #
 
     @staticmethod
-    def _find_order_column(columns: List[ColumnMapping]) -> str:
+    def _find_order_column(columns: list[ColumnMapping]) -> str:
         """Find a suitable ordering column for ROW_NUMBER dedup.
 
         Prefers columns ending in ``_time``, ``_date``, ``_id``, or ``id``.
@@ -1808,7 +1797,7 @@ class DDLAutoBuilder:
     # ------------------------------------------------------------------ #
 
     @staticmethod
-    def _extract_sql_block(text: str, index: int = 0) -> Optional[str]:
+    def _extract_sql_block(text: str, index: int = 0) -> str | None:
         """Extract the Nth ```sql ... ``` code block from the LLM response.
 
         Returns ``None`` if the block at *index* does not exist.
@@ -1820,7 +1809,7 @@ class DDLAutoBuilder:
         return None
 
     @staticmethod
-    def _extract_list_section(text: str, keyword: str) -> List[str]:
+    def _extract_list_section(text: str, keyword: str) -> list[str]:
         """Extract a bullet-point list following a heading that contains *keyword*.
 
         This is a best-effort parser for LLM output like::
@@ -1829,7 +1818,7 @@ class DDLAutoBuilder:
             1. Add an index on column X
             2. Consider partitioning by date
         """
-        items: List[str] = []
+        items: list[str] = []
         # Find the section heading containing the keyword
         heading_pattern = re.compile(
             rf"^#+\s*.*{re.escape(keyword)}.*$", re.IGNORECASE | re.MULTILINE
@@ -1864,13 +1853,13 @@ class DDLAutoBuilder:
 # ====================================================================== #
 
 async def run_ddl_pipeline(
-    source_schemas: List[TableSchema],
+    source_schemas: list[TableSchema],
     *,
     source_connection_id: str = "default",
     target_layer: str = "ODS",
     target_db_type: str = "clickhouse",
-    convention_path: Optional[str] = None,
-    naming_overrides: Optional[Dict[str, str]] = None,
+    convention_path: str | None = None,
+    naming_overrides: dict[str, str] | None = None,
     include_computation_sql: bool = True,
     local_verify: bool = True,
     sample_rows_for_verify: int = 100,

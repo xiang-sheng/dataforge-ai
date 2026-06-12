@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 ClickHouse adapter for DataForge AI.
 
@@ -14,15 +13,14 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from sqlalchemy import text
 
-from src.core.exceptions import ConnectionError, QueryExecutionError
+from src.core.exceptions import QueryExecutionError
 from src.core.schemas import (
     ColumnDataType,
     ColumnInfo,
-    ConnectionConfig,
     ConnectionTestResult,
     IndexInfo,
     IndexType,
@@ -33,7 +31,7 @@ from src.db.base import AbstractBaseAdapter
 
 logger = logging.getLogger(__name__)
 
-_CH_TYPE_MAP: Dict[str, ColumnDataType] = {
+_CH_TYPE_MAP: dict[str, ColumnDataType] = {
     "int8": ColumnDataType.INTEGER,
     "int16": ColumnDataType.INTEGER,
     "int32": ColumnDataType.INTEGER,
@@ -131,13 +129,13 @@ class ClickHouseAdapter(AbstractBaseAdapter):
     # Metadata — databases & schemas
     # ------------------------------------------------------------------ #
 
-    async def get_databases(self) -> List[str]:
+    async def get_databases(self) -> list[str]:
         rows = await self.execute_query(
             "SELECT name FROM system.databases ORDER BY name"
         )
         return [row["name"] for row in rows]
 
-    async def get_schemas(self, database: Optional[str] = None) -> List[str]:
+    async def get_schemas(self, database: str | None = None) -> list[str]:
         # ClickHouse has no schema namespace; databases are the top level
         return [""]
 
@@ -147,17 +145,17 @@ class ClickHouseAdapter(AbstractBaseAdapter):
 
     async def get_tables(
         self,
-        database: Optional[str] = None,
-        schema: Optional[str] = None,
-        table_type: Optional[str] = None,
-    ) -> List[str]:
+        database: str | None = None,
+        schema: str | None = None,
+        table_type: str | None = None,
+    ) -> list[str]:
         db = self._default_database(database) or "default"
         sql = """
             SELECT name
             FROM system.tables
             WHERE database = :db
         """
-        params: Dict[str, Any] = {"db": db}
+        params: dict[str, Any] = {"db": db}
         if table_type:
             sql += " AND engine = :engine"
             params["engine"] = table_type
@@ -168,8 +166,8 @@ class ClickHouseAdapter(AbstractBaseAdapter):
     async def get_table_schema(
         self,
         table_name: str,
-        database: Optional[str] = None,
-        schema: Optional[str] = None,
+        database: str | None = None,
+        schema: str | None = None,
     ) -> TableSchema:
         db = self._default_database(database) or "default"
         columns = await self.get_columns(table_name, database=db)
@@ -210,9 +208,9 @@ class ClickHouseAdapter(AbstractBaseAdapter):
     async def get_columns(
         self,
         table_name: str,
-        database: Optional[str] = None,
-        schema: Optional[str] = None,
-    ) -> List[ColumnInfo]:
+        database: str | None = None,
+        schema: str | None = None,
+    ) -> list[ColumnInfo]:
         db = self._default_database(database) or "default"
         sql = """
             SELECT
@@ -230,7 +228,7 @@ class ClickHouseAdapter(AbstractBaseAdapter):
             ORDER BY position
         """
         rows = await self.execute_query(sql, {"db": db, "tbl": table_name})
-        columns: List[ColumnInfo] = []
+        columns: list[ColumnInfo] = []
         for row in rows:
             default_val = row.get("default_expression") or None
             default_kind = row.get("default_kind") or ""
@@ -257,9 +255,9 @@ class ClickHouseAdapter(AbstractBaseAdapter):
     async def get_indexes(
         self,
         table_name: str,
-        database: Optional[str] = None,
-        schema: Optional[str] = None,
-    ) -> List[IndexInfo]:
+        database: str | None = None,
+        schema: str | None = None,
+    ) -> list[IndexInfo]:
         db = self._default_database(database) or "default"
         # ClickHouse uses data skipping indexes, not traditional B-tree indexes
         sql = """
@@ -278,7 +276,7 @@ class ClickHouseAdapter(AbstractBaseAdapter):
             # Older ClickHouse versions may not have this table
             return []
 
-        indexes: List[IndexInfo] = []
+        indexes: list[IndexInfo] = []
         for row in rows:
             indexes.append(
                 IndexInfo(
@@ -298,16 +296,16 @@ class ClickHouseAdapter(AbstractBaseAdapter):
     async def execute_query(
         self,
         sql: str,
-        parameters: Optional[Dict[str, Any]] = None,
-        max_rows: Optional[int] = None,
-    ) -> List[Dict[str, Any]]:
+        parameters: dict[str, Any] | None = None,
+        max_rows: int | None = None,
+    ) -> list[dict[str, Any]]:
         try:
             async with self.engine.connect() as conn:
                 result = await conn.execute(text(sql), parameters or {})
                 if result.returns_rows:
                     columns = list(result.keys())
                     rows = result.fetchmany(max_rows) if max_rows else result.fetchall()
-                    return [dict(zip(columns, row)) for row in rows]
+                    return [dict(zip(columns, row, strict=False)) for row in rows]
                 return []
         except Exception as exc:
             raise QueryExecutionError(
@@ -332,8 +330,8 @@ class ClickHouseAdapter(AbstractBaseAdapter):
     async def get_create_table_sql(
         self,
         table_name: str,
-        database: Optional[str] = None,
-        schema: Optional[str] = None,
+        database: str | None = None,
+        schema: str | None = None,
     ) -> str:
         db = self._default_database(database) or "default"
         sql = """
@@ -352,8 +350,8 @@ class ClickHouseAdapter(AbstractBaseAdapter):
     async def get_table_ddl(
         self,
         table_name: str,
-        database: Optional[str] = None,
-        schema: Optional[str] = None,
+        database: str | None = None,
+        schema: str | None = None,
     ) -> str:
         return await self.get_create_table_sql(table_name, database=database)
 
@@ -364,8 +362,8 @@ class ClickHouseAdapter(AbstractBaseAdapter):
     async def get_table_stats(
         self,
         table_name: str,
-        database: Optional[str] = None,
-        schema: Optional[str] = None,
+        database: str | None = None,
+        schema: str | None = None,
     ) -> TableStats:
         db = self._default_database(database) or "default"
         sql = """

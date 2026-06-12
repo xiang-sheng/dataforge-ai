@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 DataForge AI - Convention/spec file loader for data warehouse table creation standards.
 
@@ -24,12 +23,11 @@ from __future__ import annotations
 import copy
 import fnmatch
 import hashlib
-import json
 import logging
 import os
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -46,8 +44,8 @@ class ConventionError(Exception):
     def __init__(
         self,
         message: str = "Convention loading failed.",
-        path: Optional[str] = None,
-        details: Optional[Dict[str, Any]] = None,
+        path: str | None = None,
+        details: dict[str, Any] | None = None,
     ) -> None:
         self.message = message
         self.path = path
@@ -61,8 +59,8 @@ class ConventionParseError(ConventionError):
     def __init__(
         self,
         message: str = "Failed to parse convention file.",
-        path: Optional[str] = None,
-        details: Optional[Dict[str, Any]] = None,
+        path: str | None = None,
+        details: dict[str, Any] | None = None,
     ) -> None:
         super().__init__(message=message, path=path, details=details)
 
@@ -73,7 +71,7 @@ class ConventionValidationError(ConventionError):
     def __init__(
         self,
         message: str = "Convention validation failed.",
-        warnings: Optional[List[str]] = None,
+        warnings: list[str] | None = None,
     ) -> None:
         self.warnings = warnings or []
         super().__init__(message=message, details={"warnings": self.warnings})
@@ -108,7 +106,7 @@ class NamingConvention(BaseModel):
         default="{layer}_{domain}_{description}",
         description="Template pattern for table names.",
     )
-    column_patterns: Dict[str, str] = Field(
+    column_patterns: dict[str, str] = Field(
         default_factory=dict,
         description="Per-category column naming templates.",
     )
@@ -116,7 +114,7 @@ class NamingConvention(BaseModel):
         default="snake_case",
         description="Required identifier case style.",
     )
-    prefix_rules: Dict[str, str] = Field(
+    prefix_rules: dict[str, str] = Field(
         default_factory=lambda: {
             "ODS": "ods_",
             "DWD": "dwd_",
@@ -127,7 +125,7 @@ class NamingConvention(BaseModel):
         },
         description="Layer name -> required table name prefix.",
     )
-    suffix_rules: Dict[str, str] = Field(
+    suffix_rules: dict[str, str] = Field(
         default_factory=lambda: {
             "dimension": "_dim",
             "fact": "_fact",
@@ -135,7 +133,7 @@ class NamingConvention(BaseModel):
         },
         description="Table category -> required suffix.",
     )
-    reserved_words: List[str] = Field(
+    reserved_words: list[str] = Field(
         default_factory=lambda: [
             "select", "from", "where", "insert", "update", "delete",
             "drop", "create", "alter", "table", "index", "order",
@@ -160,7 +158,7 @@ class DataTypeStandard(BaseModel):
         forbidden_types: Types that must never be used (e.g. ``["TEXT", "BLOB"]``).
     """
 
-    logical_to_physical: Dict[str, Dict[str, str]] = Field(
+    logical_to_physical: dict[str, dict[str, str]] = Field(
         default_factory=lambda: {
             "STRING": {"clickhouse": "String", "hive": "STRING", "duckdb": "VARCHAR", "mysql": "VARCHAR(255)", "postgresql": "VARCHAR(255)"},
             "INTEGER": {"clickhouse": "Int32", "hive": "INT", "duckdb": "INTEGER", "mysql": "INT", "postgresql": "INTEGER"},
@@ -175,7 +173,7 @@ class DataTypeStandard(BaseModel):
         },
         description="Logical type -> {engine: physical type} mapping.",
     )
-    preferred_types: Dict[str, str] = Field(
+    preferred_types: dict[str, str] = Field(
         default_factory=lambda: {
             "id_column": "BIGINT",
             "amount": "DECIMAL(18,2)",
@@ -188,7 +186,7 @@ class DataTypeStandard(BaseModel):
         },
         description="Column-role hints to preferred SQL types.",
     )
-    forbidden_types: List[str] = Field(
+    forbidden_types: list[str] = Field(
         default_factory=lambda: ["TEXT", "BLOB", "MEDIUMTEXT", "LONGTEXT", "MEDIUMBLOB", "LONGBLOB"],
         description="Data types that must not be used.",
     )
@@ -208,7 +206,7 @@ class PartitionConvention(BaseModel):
         default="dt",
         description="Default partition column name.",
     )
-    partition_by_layer: Dict[str, str] = Field(
+    partition_by_layer: dict[str, str] = Field(
         default_factory=lambda: {
             "ODS": "dt",
             "DWD": "dt",
@@ -217,7 +215,7 @@ class PartitionConvention(BaseModel):
         },
         description="Layer name -> partition column override.",
     )
-    retention_days_by_layer: Dict[str, int] = Field(
+    retention_days_by_layer: dict[str, int] = Field(
         default_factory=lambda: {
             "ODS": 90,
             "DWD": 365,
@@ -247,7 +245,7 @@ class CommentConvention(BaseModel):
 
     table_comment_required: bool = Field(default=True)
     column_comment_required: bool = Field(default=True)
-    table_comment_pattern: Optional[str] = Field(default=None)
+    table_comment_pattern: str | None = Field(default=None)
     column_comment_min_length: int = Field(default=5)
 
 
@@ -264,15 +262,15 @@ class QualityRule(BaseModel):
     """
 
     primary_key_required: bool = Field(default=True)
-    not_null_columns: List[str] = Field(
+    not_null_columns: list[str] = Field(
         default_factory=lambda: ["*_id", "*_key", "*_sk", "*_bk"],
         description="Glob patterns for columns that must be NOT NULL.",
     )
-    unique_constraints: List[str] = Field(
+    unique_constraints: list[str] = Field(
         default_factory=lambda: ["*_sk", "*_bk"],
         description="Glob patterns for columns that must be UNIQUE.",
     )
-    check_constraints: List[Dict[str, str]] = Field(
+    check_constraints: list[dict[str, str]] = Field(
         default_factory=list,
         description="Column-level CHECK constraints.",
     )
@@ -287,7 +285,7 @@ class StorageConvention(BaseModel):
         index_strategy: Human-readable index strategy hints.
     """
 
-    default_format_by_engine: Dict[str, str] = Field(
+    default_format_by_engine: dict[str, str] = Field(
         default_factory=lambda: {
             "hive": "ORC",
             "clickhouse": "MergeTree",
@@ -299,7 +297,7 @@ class StorageConvention(BaseModel):
         },
         description="Engine name -> preferred storage format.",
     )
-    compression_by_engine: Dict[str, str] = Field(
+    compression_by_engine: dict[str, str] = Field(
         default_factory=lambda: {
             "hive": "SNAPPY",
             "clickhouse": "LZ4",
@@ -308,7 +306,7 @@ class StorageConvention(BaseModel):
         },
         description="Engine name -> preferred compression codec.",
     )
-    index_strategy: Dict[str, str] = Field(
+    index_strategy: dict[str, str] = Field(
         default_factory=lambda: {
             "bitmap": "For low-cardinality columns (< 1000 distinct values)",
             "btree": "For high-cardinality columns used in equality/range filters",
@@ -347,7 +345,7 @@ class TableConvention(BaseModel):
     comments: CommentConvention = Field(default_factory=CommentConvention)
     quality: QualityRule = Field(default_factory=QualityRule)
     storage: StorageConvention = Field(default_factory=StorageConvention)
-    custom_rules: Dict[str, Any] = Field(
+    custom_rules: dict[str, Any] = Field(
         default_factory=dict,
         description="User-defined extra rules.",
     )
@@ -372,7 +370,7 @@ class Violation(BaseModel):
     rule: str = Field(..., description="Rule identifier.")
     message: str = Field(..., description="Description of the violation.")
     location: str = Field(default="", description="Table or column name.")
-    suggestion: Optional[str] = Field(default=None, description="How to fix it.")
+    suggestion: str | None = Field(default=None, description="How to fix it.")
 
 
 class ValidationResult(BaseModel):
@@ -386,8 +384,8 @@ class ValidationResult(BaseModel):
     """
 
     is_valid: bool = Field(default=True)
-    violations: List[Violation] = Field(default_factory=list)
-    warnings: List[str] = Field(default_factory=list)
+    violations: list[Violation] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
     score: int = Field(default=100, ge=0, le=100)
 
 
@@ -395,7 +393,7 @@ class ValidationResult(BaseModel):
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
+def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
     """Recursively merge *override* into *base*, returning a new dict.
 
     - Dict values are merged recursively.
@@ -435,12 +433,9 @@ def _normalise_case(name: str, case_style: str) -> str:
     return name
 
 
-def _matches_any_pattern(name: str, patterns: List[str]) -> bool:
+def _matches_any_pattern(name: str, patterns: list[str]) -> bool:
     """Return ``True`` if *name* matches at least one glob in *patterns*."""
-    for pattern in patterns:
-        if fnmatch.fnmatch(name.lower(), pattern.lower()):
-            return True
-    return False
+    return any(fnmatch.fnmatch(name.lower(), pattern.lower()) for pattern in patterns)
 
 
 def _is_valid_case(name: str, case_style: str) -> bool:
@@ -475,7 +470,7 @@ _MD_TABLE_SEP_RE = re.compile(r"^\|[\s\-:|]+\|$")
 _MD_KV_RE = re.compile(r"^[-*]\s+\*\*(.+?)\*\*\s*[:=]\s*(.+)$")
 
 
-def _parse_md_yaml_block(text: str) -> Optional[Dict[str, Any]]:
+def _parse_md_yaml_block(text: str) -> dict[str, Any] | None:
     """Extract and parse the first YAML code block from Markdown *text*."""
     try:
         import yaml
@@ -493,11 +488,11 @@ def _parse_md_yaml_block(text: str) -> Optional[Dict[str, Any]]:
     return None
 
 
-def _parse_md_table(text: str) -> List[Dict[str, str]]:
+def _parse_md_table(text: str) -> list[dict[str, str]]:
     """Parse the first Markdown table found in *text* into a list of row dicts."""
-    rows: List[Dict[str, str]] = []
+    rows: list[dict[str, str]] = []
     lines = text.splitlines()
-    headers: List[str] = []
+    headers: list[str] = []
     in_table = False
     header_parsed = False
 
@@ -511,11 +506,10 @@ def _parse_md_table(text: str) -> List[Dict[str, str]]:
                 headers = cells
                 header_parsed = False
                 continue
-            if not header_parsed:
+            if not header_parsed and _MD_TABLE_SEP_RE.match(stripped):
                 # Second row = separator
-                if _MD_TABLE_SEP_RE.match(stripped):
-                    header_parsed = True
-                    continue
+                header_parsed = True
+                continue
             if header_parsed:
                 cells = [c.strip() for c in stripped.strip("|").split("|")]
                 row = {}
@@ -529,12 +523,12 @@ def _parse_md_table(text: str) -> List[Dict[str, str]]:
     return rows
 
 
-def _parse_md_key_value(text: str) -> Dict[str, str]:
+def _parse_md_key_value(text: str) -> dict[str, str]:
     """Parse Markdown bullet-list key-value pairs.
 
     Expects lines like ``- **key**: value`` or ``- **key** = value``.
     """
-    result: Dict[str, str] = {}
+    result: dict[str, str] = {}
     for line in text.splitlines():
         m = _MD_KV_RE.match(line.strip())
         if m:
@@ -542,13 +536,13 @@ def _parse_md_key_value(text: str) -> Dict[str, str]:
     return result
 
 
-def _section_map(md_text: str) -> Dict[str, str]:
+def _section_map(md_text: str) -> dict[str, str]:
     """Split a Markdown document into sections keyed by heading text.
 
     Only the body *below* each heading (up to the next heading of the same
     or higher level) is stored.
     """
-    sections: Dict[str, str] = {}
+    sections: dict[str, str] = {}
     headings = list(_MD_HEADING_RE.finditer(md_text))
 
     for idx, match in enumerate(headings):
@@ -577,8 +571,8 @@ class ConventionLoader:
     """
 
     def __init__(self) -> None:
-        self._cache: Dict[str, TableConvention] = {}
-        self._cache_hashes: Dict[str, str] = {}
+        self._cache: dict[str, TableConvention] = {}
+        self._cache_hashes: dict[str, str] = {}
 
     # -- Public loading API ------------------------------------------------
 
@@ -736,7 +730,7 @@ class ConventionLoader:
 
         # Fallback: peek at content
         raw = self._read_file(resolved).strip()
-        if raw.startswith("---") or raw.startswith("#") and ":" in raw:
+        if raw.startswith("---") or (raw.startswith("#") and ":" in raw):
             # Looks like YAML (either explicit document start or key: value)
             try:
                 return self.load_from_yaml(resolved)
@@ -755,7 +749,7 @@ class ConventionLoader:
 
     # -- Validation --------------------------------------------------------
 
-    def validate_convention(self, convention: TableConvention) -> List[str]:
+    def validate_convention(self, convention: TableConvention) -> list[str]:
         """Validate a convention for completeness and internal consistency.
 
         Returns a list of human-readable warning strings.  An empty list
@@ -767,7 +761,7 @@ class ConventionLoader:
         Returns:
             A list of warning messages.
         """
-        warnings: List[str] = []
+        warnings: list[str] = []
 
         # 1. Version format
         if not re.match(r"^\d+\.\d+\.\d+", convention.version):
@@ -827,7 +821,7 @@ class ConventionLoader:
         # 6. Cross-section consistency
         prefix_layers = set(naming.prefix_rules.keys())
         partition_layers = set(part.partition_by_layer.keys())
-        retention_layers = set(part.retention_days_by_layer.keys())
+        set(part.retention_days_by_layer.keys())
         uncovered = partition_layers - prefix_layers
         if uncovered:
             warnings.append(
@@ -910,7 +904,7 @@ class ConventionLoader:
     def _read_file(self, path: str) -> str:
         """Read a file as UTF-8 text."""
         try:
-            with open(path, "r", encoding="utf-8") as fh:
+            with open(path, encoding="utf-8") as fh:
                 return fh.read()
         except OSError as exc:
             raise ConventionParseError(
@@ -926,7 +920,7 @@ class ConventionLoader:
             self._cache_hashes[path] = ""
         self._cache[path] = convention
 
-    def _get_cached(self, path: str) -> Optional[TableConvention]:
+    def _get_cached(self, path: str) -> TableConvention | None:
         """Return the cached convention if the file has not changed."""
         if path not in self._cache:
             return None
@@ -976,7 +970,7 @@ class ConventionLoader:
         3. Bullet-list key-value pairs (``- **key**: value``).
         """
         sections = _section_map(md_text)
-        result: Dict[str, Any] = {}
+        result: dict[str, Any] = {}
 
         # Top-level metadata (before any heading, or from specific headings)
         meta_kvs = _parse_md_key_value(md_text.split("##")[0] if "##" in md_text else md_text)
@@ -986,7 +980,7 @@ class ConventionLoader:
             result["description"] = meta_kvs["description"]
 
         # Map common heading keywords to convention sections
-        heading_keywords: Dict[str, List[str]] = {
+        heading_keywords: dict[str, list[str]] = {
             "naming": ["naming", "name", "names"],
             "data_types": ["data type", "datatype", "type", "types"],
             "partition": ["partition", "partitioning"],
@@ -1000,7 +994,7 @@ class ConventionLoader:
             heading_lower = heading.lower()
 
             # Determine which section this heading maps to
-            target_key: Optional[str] = None
+            target_key: str | None = None
             for key, keywords in heading_keywords.items():
                 if any(kw in heading_lower for kw in keywords):
                     target_key = key
@@ -1038,7 +1032,7 @@ class ConventionLoader:
         return result
 
     @staticmethod
-    def _table_rows_to_section(section_key: str, rows: List[Dict[str, str]]) -> dict:
+    def _table_rows_to_section(section_key: str, rows: list[dict[str, str]]) -> dict:
         """Convert Markdown table rows into a dict appropriate for *section_key*."""
         if not rows:
             return {}
@@ -1057,7 +1051,7 @@ class ConventionLoader:
         if section_key == "data_types" and len(headers) >= 3:
             logical_col = headers[0]
             engine_cols = headers[1:]
-            mapping: Dict[str, Dict[str, str]] = {}
+            mapping: dict[str, dict[str, str]] = {}
             for row in rows:
                 logical = row.get(logical_col, "")
                 mapping[logical] = {
@@ -1070,14 +1064,14 @@ class ConventionLoader:
         return {"rows": rows}
 
     @staticmethod
-    def _kvs_to_section(section_key: str, kvs: Dict[str, str]) -> dict:
+    def _kvs_to_section(section_key: str, kvs: dict[str, str]) -> dict:
         """Convert key-value pairs into a dict appropriate for *section_key*."""
-        result: Dict[str, Any] = {}
-        bool_fields: Set[str] = {
+        result: dict[str, Any] = {}
+        bool_fields: set[str] = {
             "table_comment_required", "column_comment_required",
             "primary_key_required",
         }
-        int_fields: Set[str] = {
+        int_fields: set[str] = {
             "column_comment_min_length",
         }
 
@@ -1136,8 +1130,8 @@ class ConventionValidator:
         Returns:
             A ``ValidationResult`` with violations, warnings, and a score.
         """
-        violations: List[Violation] = []
-        warnings: List[str] = []
+        violations: list[Violation] = []
+        warnings: list[str] = []
 
         table_name = self._get_attr(schema, "table_name", "unknown_table")
         table_comment = self._get_attr(schema, "comment", "") or ""
@@ -1198,9 +1192,9 @@ class ConventionValidator:
     def validate_naming(
         self,
         table_name: str,
-        columns: List[_ColumnInfo],
+        columns: list[_ColumnInfo],
         naming: NamingConvention,
-    ) -> List[Violation]:
+    ) -> list[Violation]:
         """Check naming conventions for a table and its columns.
 
         Args:
@@ -1211,7 +1205,7 @@ class ConventionValidator:
         Returns:
             A list of naming-related violations.
         """
-        violations: List[Violation] = []
+        violations: list[Violation] = []
 
         # -- Table name case style --
         if not _is_valid_case(table_name, naming.case_style):
@@ -1292,10 +1286,10 @@ class ConventionValidator:
 
     def validate_data_types(
         self,
-        columns: List[_ColumnInfo],
+        columns: list[_ColumnInfo],
         standards: DataTypeStandard,
         target_engine: str,
-    ) -> List[Violation]:
+    ) -> list[Violation]:
         """Check data type standards for a list of columns.
 
         Args:
@@ -1306,7 +1300,7 @@ class ConventionValidator:
         Returns:
             A list of data-type-related violations.
         """
-        violations: List[Violation] = []
+        violations: list[Violation] = []
         engine_lower = target_engine.lower()
         forbidden_upper = {t.upper() for t in standards.forbidden_types}
 
@@ -1331,7 +1325,7 @@ class ConventionValidator:
                     break
 
             # Check if the type is in the known physical types for the engine
-            known_types_for_engine: Set[str] = set()
+            known_types_for_engine: set[str] = set()
             for _logical, engine_map in standards.logical_to_physical.items():
                 physical = engine_map.get(engine_lower, "")
                 if physical:
@@ -1362,9 +1356,9 @@ class ConventionValidator:
     def validate_comments(
         self,
         table_comment: str,
-        columns: List[_ColumnInfo],
+        columns: list[_ColumnInfo],
         rules: CommentConvention,
-    ) -> List[Violation]:
+    ) -> list[Violation]:
         """Check comment requirements for a table and its columns.
 
         Args:
@@ -1375,7 +1369,7 @@ class ConventionValidator:
         Returns:
             A list of comment-related violations.
         """
-        violations: List[Violation] = []
+        violations: list[Violation] = []
 
         # Table comment
         if rules.table_comment_required and not (table_comment and table_comment.strip()):
@@ -1438,11 +1432,11 @@ class ConventionValidator:
     def _validate_partition(
         self,
         schema: Any,
-        layer: Optional[str],
+        layer: str | None,
         partition: PartitionConvention,
-    ) -> List[Violation]:
+    ) -> list[Violation]:
         """Check partitioning conventions."""
-        violations: List[Violation] = []
+        violations: list[Violation] = []
 
         partition_keys = self._get_attr(schema, "partition_keys", [])
         if isinstance(partition_keys, list) and partition_keys:
@@ -1480,11 +1474,11 @@ class ConventionValidator:
     def _validate_quality(
         self,
         table_name: str,
-        columns: List[_ColumnInfo],
+        columns: list[_ColumnInfo],
         quality: QualityRule,
-    ) -> List[Violation]:
+    ) -> list[Violation]:
         """Check data quality constraints."""
-        violations: List[Violation] = []
+        violations: list[Violation] = []
 
         # Primary key required
         if quality.primary_key_required:
@@ -1500,18 +1494,17 @@ class ConventionValidator:
 
         # NOT NULL columns
         for col in columns:
-            if _matches_any_pattern(col.name, quality.not_null_columns):
-                if col.nullable:
-                    violations.append(Violation(
-                        severity="warning",
-                        rule="quality.not_null",
-                        message=(
-                            f"Column '{col.name}' matches a NOT NULL pattern "
-                            f"but is marked as nullable."
-                        ),
-                        location=col.name,
-                        suggestion="Set the column to NOT NULL.",
-                    ))
+            if _matches_any_pattern(col.name, quality.not_null_columns) and col.nullable:
+                violations.append(Violation(
+                    severity="warning",
+                    rule="quality.not_null",
+                    message=(
+                        f"Column '{col.name}' matches a NOT NULL pattern "
+                        f"but is marked as nullable."
+                    ),
+                    location=col.name,
+                    suggestion="Set the column to NOT NULL.",
+                ))
 
         # UNIQUE columns
         for col in columns:
@@ -1535,9 +1528,9 @@ class ConventionValidator:
         schema: Any,
         target_engine: str,
         storage: StorageConvention,
-    ) -> List[Violation]:
+    ) -> list[Violation]:
         """Check storage format and compression conventions."""
-        violations: List[Violation] = []
+        violations: list[Violation] = []
         engine_lower = target_engine.lower()
 
         storage_format = self._get_attr(schema, "storage_format", "")
@@ -1585,7 +1578,7 @@ class ConventionValidator:
     def _detect_layer(
         table_name: str,
         naming: NamingConvention,
-    ) -> Optional[str]:
+    ) -> str | None:
         """Detect the warehouse layer from a table name based on prefix rules."""
         for layer, prefix in naming.prefix_rules.items():
             if table_name.startswith(prefix):
@@ -1595,8 +1588,8 @@ class ConventionValidator:
     @staticmethod
     def _detect_layer_from_name(
         table_name: str,
-        prefix_rules: Dict[str, str],
-    ) -> Optional[str]:
+        prefix_rules: dict[str, str],
+    ) -> str | None:
         """Detect the layer from a table name using prefix rules."""
         for layer, prefix in prefix_rules.items():
             if table_name.startswith(prefix):
@@ -1604,9 +1597,9 @@ class ConventionValidator:
         return None
 
     @staticmethod
-    def _normalise_columns(columns: Any) -> List[_ColumnInfo]:
+    def _normalise_columns(columns: Any) -> list[_ColumnInfo]:
         """Convert various column representations into ``_ColumnInfo`` objects."""
-        result: List[_ColumnInfo] = []
+        result: list[_ColumnInfo] = []
         if not columns:
             return result
 
@@ -1648,7 +1641,7 @@ class _ColumnInfo:
     ``warehouse.schema_manager``.
     """
 
-    __slots__ = ("name", "data_type", "nullable", "is_primary_key", "comment")
+    __slots__ = ("comment", "data_type", "is_primary_key", "name", "nullable")
 
     def __init__(
         self,

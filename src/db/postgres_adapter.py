@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 PostgreSQL adapter for DataForge AI.
 
@@ -11,7 +10,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from sqlalchemy import text
 
@@ -19,7 +18,6 @@ from src.core.exceptions import ConnectionError, QueryExecutionError
 from src.core.schemas import (
     ColumnDataType,
     ColumnInfo,
-    ConnectionConfig,
     ConnectionTestResult,
     IndexInfo,
     IndexType,
@@ -30,7 +28,7 @@ from src.db.base import AbstractBaseAdapter
 
 logger = logging.getLogger(__name__)
 
-_PG_TYPE_MAP: Dict[str, ColumnDataType] = {
+_PG_TYPE_MAP: dict[str, ColumnDataType] = {
     "smallint": ColumnDataType.INTEGER,
     "integer": ColumnDataType.INTEGER,
     "int": ColumnDataType.INTEGER,
@@ -138,13 +136,13 @@ class PostgreSQLAdapter(AbstractBaseAdapter):
     # Metadata — databases & schemas
     # ------------------------------------------------------------------ #
 
-    async def get_databases(self) -> List[str]:
+    async def get_databases(self) -> list[str]:
         rows = await self.execute_query(
             "SELECT datname FROM pg_catalog.pg_database WHERE datistemplate = false ORDER BY datname"
         )
         return [row["datname"] for row in rows]
 
-    async def get_schemas(self, database: Optional[str] = None) -> List[str]:
+    async def get_schemas(self, database: str | None = None) -> list[str]:
         rows = await self.execute_query(
             """
             SELECT schema_name
@@ -161,17 +159,17 @@ class PostgreSQLAdapter(AbstractBaseAdapter):
 
     async def get_tables(
         self,
-        database: Optional[str] = None,
-        schema: Optional[str] = None,
-        table_type: Optional[str] = None,
-    ) -> List[str]:
+        database: str | None = None,
+        schema: str | None = None,
+        table_type: str | None = None,
+    ) -> list[str]:
         sch = self._default_schema(schema) or "public"
         sql = """
             SELECT table_name
             FROM information_schema.tables
             WHERE table_schema = :schema
         """
-        params: Dict[str, Any] = {"schema": sch}
+        params: dict[str, Any] = {"schema": sch}
         if table_type:
             sql += " AND table_type = :ttype"
             params["ttype"] = table_type
@@ -184,8 +182,8 @@ class PostgreSQLAdapter(AbstractBaseAdapter):
     async def get_table_schema(
         self,
         table_name: str,
-        database: Optional[str] = None,
-        schema: Optional[str] = None,
+        database: str | None = None,
+        schema: str | None = None,
     ) -> TableSchema:
         sch = self._default_schema(schema) or "public"
         db = self._default_database(database)
@@ -229,9 +227,9 @@ class PostgreSQLAdapter(AbstractBaseAdapter):
     async def get_columns(
         self,
         table_name: str,
-        database: Optional[str] = None,
-        schema: Optional[str] = None,
-    ) -> List[ColumnInfo]:
+        database: str | None = None,
+        schema: str | None = None,
+    ) -> list[ColumnInfo]:
         sch = self._default_schema(schema) or "public"
         sql = """
             SELECT
@@ -266,7 +264,7 @@ class PostgreSQLAdapter(AbstractBaseAdapter):
             ORDER BY c.ordinal_position
         """
         rows = await self.execute_query(sql, {"schema": sch, "tbl": table_name})
-        columns: List[ColumnInfo] = []
+        columns: list[ColumnInfo] = []
         for row in rows:
             native = row.get("data_type", "")
             udt = row.get("udt_name", "")
@@ -290,9 +288,9 @@ class PostgreSQLAdapter(AbstractBaseAdapter):
     async def get_indexes(
         self,
         table_name: str,
-        database: Optional[str] = None,
-        schema: Optional[str] = None,
-    ) -> List[IndexInfo]:
+        database: str | None = None,
+        schema: str | None = None,
+    ) -> list[IndexInfo]:
         sch = self._default_schema(schema) or "public"
         sql = """
             SELECT
@@ -310,7 +308,7 @@ class PostgreSQLAdapter(AbstractBaseAdapter):
             ORDER BY i.relname
         """
         rows = await self.execute_query(sql, {"tbl": table_name, "schema": sch})
-        indexes: List[IndexInfo] = []
+        indexes: list[IndexInfo] = []
         for row in rows:
             if row["is_primary"]:
                 idx_type = IndexType.PRIMARY
@@ -339,16 +337,16 @@ class PostgreSQLAdapter(AbstractBaseAdapter):
     async def execute_query(
         self,
         sql: str,
-        parameters: Optional[Dict[str, Any]] = None,
-        max_rows: Optional[int] = None,
-    ) -> List[Dict[str, Any]]:
+        parameters: dict[str, Any] | None = None,
+        max_rows: int | None = None,
+    ) -> list[dict[str, Any]]:
         try:
             async with self.engine.connect() as conn:
                 result = await conn.execute(text(sql), parameters or {})
                 if result.returns_rows:
                     columns = list(result.keys())
                     rows = result.fetchmany(max_rows) if max_rows else result.fetchall()
-                    return [dict(zip(columns, row)) for row in rows]
+                    return [dict(zip(columns, row, strict=False)) for row in rows]
                 return []
         except Exception as exc:
             raise QueryExecutionError(
@@ -373,8 +371,8 @@ class PostgreSQLAdapter(AbstractBaseAdapter):
     async def get_create_table_sql(
         self,
         table_name: str,
-        database: Optional[str] = None,
-        schema: Optional[str] = None,
+        database: str | None = None,
+        schema: str | None = None,
     ) -> str:
         """
         PostgreSQL does not have ``SHOW CREATE TABLE``.
@@ -384,7 +382,7 @@ class PostgreSQLAdapter(AbstractBaseAdapter):
         columns = await self.get_columns(table_name, schema=sch)
         indexes = await self.get_indexes(table_name, schema=sch)
 
-        lines: List[str] = []
+        lines: list[str] = []
         for col in columns:
             parts = [f'    "{col.name}" {col.data_type}']
             if not col.nullable:
@@ -415,8 +413,8 @@ class PostgreSQLAdapter(AbstractBaseAdapter):
     async def get_table_ddl(
         self,
         table_name: str,
-        database: Optional[str] = None,
-        schema: Optional[str] = None,
+        database: str | None = None,
+        schema: str | None = None,
     ) -> str:
         return await self.get_create_table_sql(table_name, database=database, schema=schema)
 
@@ -427,8 +425,8 @@ class PostgreSQLAdapter(AbstractBaseAdapter):
     async def get_table_stats(
         self,
         table_name: str,
-        database: Optional[str] = None,
-        schema: Optional[str] = None,
+        database: str | None = None,
+        schema: str | None = None,
     ) -> TableStats:
         sch = self._default_schema(schema) or "public"
         sql = """

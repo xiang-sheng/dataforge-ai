@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 DataForge AI - ETL pipeline design and orchestration.
 
@@ -9,13 +8,12 @@ tools (Apache Airflow and DolphinScheduler).
 
 from __future__ import annotations
 
-import json
 import logging
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
-from enum import Enum
-from typing import Any, Dict, List, Optional, Union
+from datetime import datetime
+from enum import StrEnum
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +22,7 @@ logger = logging.getLogger(__name__)
 # Enums
 # ---------------------------------------------------------------------------
 
-class StepType(str, Enum):
+class StepType(StrEnum):
     """Types of pipeline steps."""
 
     EXTRACT = "extract"
@@ -34,7 +32,7 @@ class StepType(str, Enum):
     NOTIFY = "notify"
 
 
-class ExtractStrategy(str, Enum):
+class ExtractStrategy(StrEnum):
     """Data extraction strategies."""
 
     FULL = "full"
@@ -43,7 +41,7 @@ class ExtractStrategy(str, Enum):
     SNAPSHOT = "snapshot"
 
 
-class TransformType(str, Enum):
+class TransformType(StrEnum):
     """Types of data transformations."""
 
     SQL = "sql"
@@ -59,7 +57,7 @@ class TransformType(str, Enum):
     UNPIVOT = "unpivot"
 
 
-class LoadStrategy(str, Enum):
+class LoadStrategy(StrEnum):
     """Data loading strategies."""
 
     INSERT = "insert"
@@ -70,7 +68,7 @@ class LoadStrategy(str, Enum):
     REPLACE = "replace"
 
 
-class ScheduleFrequency(str, Enum):
+class ScheduleFrequency(StrEnum):
     """Common scheduling frequencies."""
 
     HOURLY = "hourly"
@@ -80,7 +78,7 @@ class ScheduleFrequency(str, Enum):
     ON_DEMAND = "on_demand"
 
 
-class PipelineStatus(str, Enum):
+class PipelineStatus(StrEnum):
     """Pipeline lifecycle statuses."""
 
     DRAFT = "draft"
@@ -115,12 +113,12 @@ class SourceConfig:
     connection_id: str = ""
     source_type: str = "mysql"
     source_table: str = ""
-    query: Optional[str] = None
-    incremental_column: Optional[str] = None
+    query: str | None = None
+    incremental_column: str | None = None
     extract_strategy: ExtractStrategy = ExtractStrategy.FULL
     batch_size: int = 100_000
-    filters: List[str] = field(default_factory=list)
-    columns: List[str] = field(default_factory=list)
+    filters: list[str] = field(default_factory=list)
+    columns: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -143,11 +141,11 @@ class TransformRule:
     name: str = ""
     transform_type: TransformType = TransformType.SQL
     expression: str = ""
-    input_columns: List[str] = field(default_factory=list)
-    output_columns: List[str] = field(default_factory=list)
+    input_columns: list[str] = field(default_factory=list)
+    output_columns: list[str] = field(default_factory=list)
     description: str = ""
     order: int = 0
-    parameters: Dict[str, Any] = field(default_factory=dict)
+    parameters: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.rule_id:
@@ -175,11 +173,11 @@ class TargetConfig:
     target_type: str = "hive"
     target_table: str = ""
     load_strategy: LoadStrategy = LoadStrategy.INSERT_OVERWRITE
-    partition_column: Optional[str] = None
-    partition_value: Optional[str] = None
-    merge_keys: List[str] = field(default_factory=list)
-    pre_load_sql: Optional[str] = None
-    post_load_sql: Optional[str] = None
+    partition_column: str | None = None
+    partition_value: str | None = None
+    merge_keys: list[str] = field(default_factory=list)
+    pre_load_sql: str | None = None
+    post_load_sql: str | None = None
     idempotent: bool = True
 
 
@@ -202,8 +200,8 @@ class ScheduleConfig:
 
     frequency: ScheduleFrequency = ScheduleFrequency.DAILY
     cron_expression: str = "0 2 * * *"  # Default: 2 AM daily
-    start_date: Optional[datetime] = None
-    end_date: Optional[datetime] = None
+    start_date: datetime | None = None
+    end_date: datetime | None = None
     catchup: bool = False
     max_active_runs: int = 1
     retry_count: int = 3
@@ -230,7 +228,7 @@ class DataQualityCheck:
     check_id: str = ""
     check_type: str = "null_check"
     table: str = ""
-    column: Optional[str] = None
+    column: str | None = None
     expression: str = ""
     threshold: float = 0.0
     action_on_failure: str = "fail"  # "fail", "warn", "skip"
@@ -262,12 +260,12 @@ class PipelineStep:
     step_id: str = ""
     name: str = ""
     step_type: StepType = StepType.TRANSFORM
-    source_config: Optional[SourceConfig] = None
-    transform_rules: List[TransformRule] = field(default_factory=list)
-    target_config: Optional[TargetConfig] = None
-    quality_checks: List[DataQualityCheck] = field(default_factory=list)
-    depends_on: List[str] = field(default_factory=list)
-    parameters: Dict[str, Any] = field(default_factory=dict)
+    source_config: SourceConfig | None = None
+    transform_rules: list[TransformRule] = field(default_factory=list)
+    target_config: TargetConfig | None = None
+    quality_checks: list[DataQualityCheck] = field(default_factory=list)
+    depends_on: list[str] = field(default_factory=list)
+    parameters: dict[str, Any] = field(default_factory=dict)
     timeout: int = 3600
     retry_count: int = 3
 
@@ -300,13 +298,13 @@ class Pipeline:
     name: str = ""
     description: str = ""
     version: str = "1.0.0"
-    steps: List[PipelineStep] = field(default_factory=list)
-    schedule: Optional[ScheduleConfig] = None
-    tags: List[str] = field(default_factory=list)
+    steps: list[PipelineStep] = field(default_factory=list)
+    schedule: ScheduleConfig | None = None
+    tags: list[str] = field(default_factory=list)
     owner: str = ""
     status: PipelineStatus = PipelineStatus.DRAFT
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
     def __post_init__(self) -> None:
         if not self.pipeline_id:
@@ -328,9 +326,9 @@ class ValidationResult:
     """
 
     is_valid: bool = True
-    errors: List[str] = field(default_factory=list)
-    warnings: List[str] = field(default_factory=list)
-    suggestions: List[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    suggestions: list[str] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -378,7 +376,7 @@ class PipelineBuilder:
     """
 
     def __init__(self) -> None:
-        self._pipeline: Optional[Pipeline] = None
+        self._pipeline: Pipeline | None = None
 
     # -- Builder methods ----------------------------------------------------
 
@@ -386,10 +384,10 @@ class PipelineBuilder:
         self,
         name: str,
         description: str = "",
-        schedule: Optional[ScheduleConfig] = None,
+        schedule: ScheduleConfig | None = None,
         owner: str = "",
-        tags: Optional[List[str]] = None,
-    ) -> "PipelineBuilder":
+        tags: list[str] | None = None,
+    ) -> PipelineBuilder:
         """Initialize a new pipeline.
 
         Args:
@@ -414,10 +412,10 @@ class PipelineBuilder:
     def add_extract_step(
         self,
         source_config: SourceConfig,
-        name: Optional[str] = None,
-        depends_on: Optional[List[str]] = None,
-        quality_checks: Optional[List[DataQualityCheck]] = None,
-    ) -> "PipelineBuilder":
+        name: str | None = None,
+        depends_on: list[str] | None = None,
+        quality_checks: list[DataQualityCheck] | None = None,
+    ) -> PipelineBuilder:
         """Add an extract step to the pipeline.
 
         Args:
@@ -445,11 +443,11 @@ class PipelineBuilder:
 
     def add_transform_step(
         self,
-        transform_rules: Union[TransformRule, List[TransformRule]],
-        name: Optional[str] = None,
-        depends_on: Optional[List[str]] = None,
-        quality_checks: Optional[List[DataQualityCheck]] = None,
-    ) -> "PipelineBuilder":
+        transform_rules: TransformRule | list[TransformRule],
+        name: str | None = None,
+        depends_on: list[str] | None = None,
+        quality_checks: list[DataQualityCheck] | None = None,
+    ) -> PipelineBuilder:
         """Add a transform step to the pipeline.
 
         Args:
@@ -486,10 +484,10 @@ class PipelineBuilder:
     def add_load_step(
         self,
         target_config: TargetConfig,
-        name: Optional[str] = None,
-        depends_on: Optional[List[str]] = None,
-        quality_checks: Optional[List[DataQualityCheck]] = None,
-    ) -> "PipelineBuilder":
+        name: str | None = None,
+        depends_on: list[str] | None = None,
+        quality_checks: list[DataQualityCheck] | None = None,
+    ) -> PipelineBuilder:
         """Add a load step to the pipeline.
 
         Args:
@@ -519,10 +517,10 @@ class PipelineBuilder:
 
     def add_validation_step(
         self,
-        quality_checks: List[DataQualityCheck],
-        name: Optional[str] = None,
-        depends_on: Optional[List[str]] = None,
-    ) -> "PipelineBuilder":
+        quality_checks: list[DataQualityCheck],
+        name: str | None = None,
+        depends_on: list[str] | None = None,
+    ) -> PipelineBuilder:
         """Add a dedicated validation / data quality step.
 
         Args:
@@ -548,7 +546,7 @@ class PipelineBuilder:
         self._pipeline.steps.append(step)  # type: ignore[union-attr]
         return self
 
-    def set_schedule(self, schedule: ScheduleConfig) -> "PipelineBuilder":
+    def set_schedule(self, schedule: ScheduleConfig) -> PipelineBuilder:
         """Set or override the pipeline's schedule configuration.
 
         Args:
@@ -576,7 +574,7 @@ class PipelineBuilder:
 
     # -- Validation ---------------------------------------------------------
 
-    def validate_pipeline(self, pipeline: Optional[Pipeline] = None) -> ValidationResult:
+    def validate_pipeline(self, pipeline: Pipeline | None = None) -> ValidationResult:
         """Validate a pipeline for completeness and correctness.
 
         Checks for:
@@ -696,9 +694,9 @@ class PipelineBuilder:
 
     def generate_airflow_dag(
         self,
-        pipeline: Optional[Pipeline] = None,
-        dag_id: Optional[str] = None,
-        default_args: Optional[Dict[str, Any]] = None,
+        pipeline: Pipeline | None = None,
+        dag_id: str | None = None,
+        default_args: dict[str, Any] | None = None,
     ) -> str:
         """Generate an Apache Airflow DAG Python file from a pipeline.
 
@@ -727,7 +725,7 @@ class PipelineBuilder:
             "execution_timeout": f"timedelta(seconds={schedule.timeout})",
         }
 
-        lines: List[str] = [
+        lines: list[str] = [
             "# -*- coding: utf-8 -*-",
             '"""',
             f"Auto-generated Airflow DAG for pipeline: {p.name}",
@@ -746,9 +744,9 @@ class PipelineBuilder:
             f"default_args = {self._format_dict(default_args_dict)}",
             "",
             "",
-            f'with DAG(',
+            'with DAG(',
             f'    dag_id="{dag_id}",',
-            f"    default_args=default_args,",
+            "    default_args=default_args,",
             f'    description="{p.description}",',
             f'    schedule_interval="{schedule.cron_expression}",',
             f'    start_date=datetime({(schedule.start_date or datetime(2024, 1, 1)).year}, '
@@ -757,12 +755,12 @@ class PipelineBuilder:
             f"    catchup={schedule.catchup},",
             f"    max_active_runs={schedule.max_active_runs},",
             f"    tags={p.tags},",
-            f") as dag:",
+            ") as dag:",
             "",
         ]
 
         # Generate tasks
-        task_var_names: Dict[str, str] = {}
+        task_var_names: dict[str, str] = {}
         for step in p.steps:
             var_name = f"task_{step.step_id}"
             task_var_names[step.step_id] = var_name
@@ -796,7 +794,7 @@ class PipelineBuilder:
 
     def generate_dolphin_scheduler_yaml(
         self,
-        pipeline: Optional[Pipeline] = None,
+        pipeline: Pipeline | None = None,
         project_name: str = "dataforge",
     ) -> str:
         """Generate a DolphinScheduler workflow definition in YAML format.
@@ -814,7 +812,7 @@ class PipelineBuilder:
 
         schedule = p.schedule or ScheduleConfig()
 
-        yaml_lines: List[str] = [
+        yaml_lines: list[str] = [
             f"# DolphinScheduler workflow for pipeline: {p.name}",
             f"# Generated by DataForge AI on {datetime.utcnow().isoformat()}",
             "---",
@@ -828,9 +826,9 @@ class PipelineBuilder:
             "  schedule:",
             f"    cron: \"{schedule.cron_expression}\"",
             f"    start_time: \"{(schedule.start_date or datetime(2024, 1, 1)).isoformat()}\"",
-            f"    failure_strategy: \"continue\"",
-            f"    warning_type: \"all\"",
-            f"    worker_group: \"default\"",
+            "    failure_strategy: \"continue\"",
+            "    warning_type: \"all\"",
+            "    worker_group: \"default\"",
             f"    timeout: {schedule.timeout // 60}  # minutes",
             "  tasks:",
         ]
@@ -866,7 +864,7 @@ class PipelineBuilder:
     @staticmethod
     def _has_dependency_cycles(pipeline: Pipeline) -> bool:
         """Check if the pipeline's step dependency graph has cycles."""
-        adj: Dict[str, List[str]] = {}
+        adj: dict[str, list[str]] = {}
         for step in pipeline.steps:
             adj[step.step_id] = step.depends_on
 
@@ -885,14 +883,10 @@ class PipelineBuilder:
             rec_stack.discard(node)
             return False
 
-        for step_id in adj:
-            if step_id not in visited:
-                if _dfs(step_id):
-                    return True
-        return False
+        return any(step_id not in visited and _dfs(step_id) for step_id in adj)
 
     @staticmethod
-    def _format_dict(d: Dict[str, Any]) -> str:
+    def _format_dict(d: dict[str, Any]) -> str:
         """Format a dictionary as a Python dict literal string."""
         items = []
         for k, v in d.items():
@@ -902,23 +896,23 @@ class PipelineBuilder:
                 items.append(f"    \"{k}\": {v}")
         return "{\n" + ",\n".join(items) + ",\n}"
 
-    def _gen_airflow_extract_task(self, step: PipelineStep, var_name: str) -> List[str]:
+    def _gen_airflow_extract_task(self, step: PipelineStep, var_name: str) -> list[str]:
         """Generate Airflow task code for an extract step."""
         cfg = step.source_config
         lines = [
             f"    {var_name} = PythonOperator(",
             f'        task_id="{step.name}",',
-            f"        python_callable=extract_data,",
-            f"        op_kwargs={{",
+            "        python_callable=extract_data,",
+            "        op_kwargs={",
             f'            "connection_id": "{cfg.connection_id if cfg else ""}",',
             f'            "source_table": "{cfg.source_table if cfg else ""}",',
             f'            "strategy": "{cfg.extract_strategy.value if cfg else "full"}",',
-            f"        }},",
-            f"    )",
+            "        },",
+            "    )",
         ]
         return lines
 
-    def _gen_airflow_transform_task(self, step: PipelineStep, var_name: str) -> List[str]:
+    def _gen_airflow_transform_task(self, step: PipelineStep, var_name: str) -> list[str]:
         """Generate Airflow task code for a transform step."""
         # Use SQL if all rules are SQL type, otherwise Python
         all_sql = all(r.transform_type == TransformType.SQL for r in step.transform_rules)
@@ -928,53 +922,53 @@ class PipelineBuilder:
             lines = [
                 f"    {var_name} = HiveOperator(",
                 f'        task_id="{step.name}",',
-                f'        hql="""',
+                '        hql="""',
                 f"        {sql_expr}",
-                f'        """,',
-                f"    )",
+                '        """,',
+                "    )",
             ]
         else:
             lines = [
                 f"    {var_name} = PythonOperator(",
                 f'        task_id="{step.name}",',
-                f"        python_callable=transform_data,",
-                f"        op_kwargs={{",
+                "        python_callable=transform_data,",
+                "        op_kwargs={",
                 f'            "rules": {len(step.transform_rules)},',
-                f"        }},",
-                f"    )",
+                "        },",
+                "    )",
             ]
         return lines
 
-    def _gen_airflow_load_task(self, step: PipelineStep, var_name: str) -> List[str]:
+    def _gen_airflow_load_task(self, step: PipelineStep, var_name: str) -> list[str]:
         """Generate Airflow task code for a load step."""
         cfg = step.target_config
         lines = [
             f"    {var_name} = PythonOperator(",
             f'        task_id="{step.name}",',
-            f"        python_callable=load_data,",
-            f"        op_kwargs={{",
+            "        python_callable=load_data,",
+            "        op_kwargs={",
             f'            "connection_id": "{cfg.connection_id if cfg else ""}",',
             f'            "target_table": "{cfg.target_table if cfg else ""}",',
             f'            "strategy": "{cfg.load_strategy.value if cfg else "insert"}",',
-            f"        }},",
-            f"    )",
+            "        },",
+            "    )",
         ]
         return lines
 
-    def _gen_airflow_validate_task(self, step: PipelineStep, var_name: str) -> List[str]:
+    def _gen_airflow_validate_task(self, step: PipelineStep, var_name: str) -> list[str]:
         """Generate Airflow task code for a validation step."""
         lines = [
             f"    {var_name} = PythonOperator(",
             f'        task_id="{step.name}",',
-            f"        python_callable=run_quality_checks,",
-            f"        op_kwargs={{",
+            "        python_callable=run_quality_checks,",
+            "        op_kwargs={",
             f'            "checks_count": {len(step.quality_checks)},',
-            f"        }},",
-            f"    )",
+            "        },",
+            "    )",
         ]
         return lines
 
-    def _gen_ds_task(self, step: PipelineStep) -> List[str]:
+    def _gen_ds_task(self, step: PipelineStep) -> list[str]:
         """Generate DolphinScheduler YAML task definition."""
         lines = [
             f"    - name: {step.name}",
@@ -985,18 +979,18 @@ class PipelineBuilder:
         if step.step_type == StepType.EXTRACT and step.source_config:
             cfg = step.source_config
             lines.extend([
-                f"      params:",
+                "      params:",
                 f"        connection_id: \"{cfg.connection_id}\"",
                 f"        source_table: \"{cfg.source_table}\"",
                 f"        strategy: \"{cfg.extract_strategy.value}\"",
             ])
         elif step.step_type == StepType.TRANSFORM:
             lines.extend([
-                f"      params:",
+                "      params:",
                 f"        rules_count: {len(step.transform_rules)}",
             ])
             if step.transform_rules:
-                lines.append(f"        sql: |")
+                lines.append("        sql: |")
                 for rule in step.transform_rules:
                     if rule.transform_type == TransformType.SQL:
                         for sql_line in rule.expression.splitlines():
@@ -1004,7 +998,7 @@ class PipelineBuilder:
         elif step.step_type == StepType.LOAD and step.target_config:
             cfg = step.target_config
             lines.extend([
-                f"      params:",
+                "      params:",
                 f"        connection_id: \"{cfg.connection_id}\"",
                 f"        target_table: \"{cfg.target_table}\"",
                 f"        strategy: \"{cfg.load_strategy.value}\"",

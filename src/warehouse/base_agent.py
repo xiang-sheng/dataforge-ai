@@ -9,10 +9,10 @@ All agents (SQLAgent, DDLAgent, GovernanceAgent) share this base:
 
 from __future__ import annotations
 
-import json
+import ast
 import logging
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 from langchain.agents import create_agent
 from langchain_core.callbacks import BaseCallbackHandler
@@ -48,10 +48,10 @@ class _ToolCallTracker(BaseCallbackHandler):
         self._step += 1
         tool_name = serialized.get("name", "unknown")
         try:
-            args = eval(input_str) if isinstance(input_str, str) else input_str
+            args = ast.literal_eval(input_str) if isinstance(input_str, str) else input_str
             if not isinstance(args, dict):
                 args = {"input": input_str}
-        except Exception:
+        except (ValueError, SyntaxError):
             args = {"raw": input_str}
 
         self.calls.append(ToolCallLog(
@@ -84,11 +84,22 @@ class BaseAgent:
         self.system_prompt = system_prompt
         self._llm = llm
         self._tool_map: dict[str, Any] = {t.name: t for t in tools}
+        self._agent = None  # lazy-built agent graph
+
+    def _get_agent(self):
+        """Build the agent graph once and cache it."""
+        if self._agent is None:
+            self._agent = create_agent(
+                self._llm,
+                tools=self.tools,
+                system_prompt=self.system_prompt,
+            )
+        return self._agent
 
     def invoke(
         self,
         messages: list[BaseMessage],
-        tool_calls_log: Optional[list[ToolCallLog]] = None,
+        tool_calls_log: list[ToolCallLog] | None = None,
     ) -> AIMessage:
         """Run the agent with the given messages.
 
@@ -102,11 +113,7 @@ class BaseAgent:
         Returns:
             The final AIMessage (with no pending tool calls).
         """
-        agent = create_agent(
-            self._llm,
-            tools=self.tools,
-            system_prompt=self.system_prompt,
-        )
+        agent = self._get_agent()
 
         tracker = _ToolCallTracker()
         # recursion_limit counts graph steps (model + tool per iteration)

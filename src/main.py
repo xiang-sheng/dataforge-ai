@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 FastAPI application entry point for DataForge AI.
 
@@ -16,7 +15,7 @@ from __future__ import annotations
 import logging
 import time
 from contextlib import asynccontextmanager
-from typing import AsyncIterator
+from typing import TYPE_CHECKING
 
 import redis.asyncio as aioredis
 from fastapi import FastAPI, Request, Response
@@ -24,9 +23,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from src import __version__
+from src.api.router import api_router
 from src.config.settings import get_settings
 from src.core.database import ConnectionManager
 from src.core.exceptions import DataForgeError
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 # ------------------------------------------------------------------ #
 # Logging
@@ -259,8 +262,6 @@ async def health_check() -> dict:
 # ------------------------------------------------------------------ #
 # API routers
 # ------------------------------------------------------------------ #
-
-from src.api.router import api_router
 
 app.include_router(api_router)
 

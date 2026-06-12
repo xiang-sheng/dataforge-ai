@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Pydantic schemas and data models for DataForge AI.
 
@@ -12,18 +11,17 @@ from __future__ import annotations
 
 import enum
 from datetime import datetime
-from typing import Any, Dict, List, Optional
-from uuid import UUID, uuid4
+from typing import Any
+from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict, Field
-
 
 # ====================================================================== #
 # Enums
 # ====================================================================== #
 
 
-class DatabaseType(str, enum.Enum):
+class DatabaseType(enum.StrEnum):
     """Supported database engine types."""
 
     MYSQL = "mysql"
@@ -35,7 +33,7 @@ class DatabaseType(str, enum.Enum):
     ORACLE = "oracle"
 
 
-class WarehouseLayer(str, enum.Enum):
+class WarehouseLayer(enum.StrEnum):
     """
     Standard data-warehouse layering taxonomy.
 
@@ -52,7 +50,7 @@ class WarehouseLayer(str, enum.Enum):
     ADS = "ADS"
 
 
-class ColumnDataType(str, enum.Enum):
+class ColumnDataType(enum.StrEnum):
     """Logical (engine-agnostic) column data types used in the modelling layer."""
 
     STRING = "STRING"
@@ -72,7 +70,7 @@ class ColumnDataType(str, enum.Enum):
     STRUCT = "STRUCT"
 
 
-class IndexType(str, enum.Enum):
+class IndexType(enum.StrEnum):
     """Types of database indexes."""
 
     PRIMARY = "PRIMARY"
@@ -83,7 +81,7 @@ class IndexType(str, enum.Enum):
     CLUSTERED = "CLUSTERED"
 
 
-class ETLTaskStatus(str, enum.Enum):
+class ETLTaskStatus(enum.StrEnum):
     """Lifecycle states for an ETL task."""
 
     PENDING = "PENDING"
@@ -94,7 +92,7 @@ class ETLTaskStatus(str, enum.Enum):
     SKIPPED = "SKIPPED"
 
 
-class LineageNodeType(str, enum.Enum):
+class LineageNodeType(enum.StrEnum):
     """Types of nodes that can appear in a data-lineage graph."""
 
     DATABASE = "DATABASE"
@@ -121,7 +119,7 @@ class ConnectionConfig(BaseModel):
 
     model_config = ConfigDict(use_enum_values=True)
 
-    connection_id: Optional[str] = Field(
+    connection_id: str | None = Field(
         default=None,
         description="Unique identifier for this connection. Auto-generated on creation.",
     )
@@ -163,17 +161,17 @@ class ConnectionConfig(BaseModel):
         description="Password for the database user. Stored encrypted at rest.",
     )
 
-    database: Optional[str] = Field(
+    database: str | None = Field(
         default=None,
         description="Default database / catalog to use. Omit to connect without selecting one.",
     )
 
-    schema_name: Optional[str] = Field(
+    schema_name: str | None = Field(
         default=None,
         description="Default schema within the database (PostgreSQL / SQL Server / Oracle).",
     )
 
-    extra_params: Dict[str, Any] = Field(
+    extra_params: dict[str, Any] = Field(
         default_factory=dict,
         description=(
             "Engine-specific connection parameters (e.g. SSL options, "
@@ -193,17 +191,17 @@ class ConnectionConfig(BaseModel):
         description="Timeout in seconds when establishing the connection.",
     )
 
-    tags: List[str] = Field(
+    tags: list[str] = Field(
         default_factory=list,
         description="User-defined tags for filtering and grouping connections.",
     )
 
-    created_at: Optional[datetime] = Field(
+    created_at: datetime | None = Field(
         default=None,
         description="Timestamp when the connection was created.",
     )
 
-    updated_at: Optional[datetime] = Field(
+    updated_at: datetime | None = Field(
         default=None,
         description="Timestamp of the last update to this connection config.",
     )
@@ -222,12 +220,12 @@ class ConnectionTestResult(BaseModel):
         description="Human-readable status message.",
     )
 
-    latency_ms: Optional[float] = Field(
+    latency_ms: float | None = Field(
         default=None,
         description="Round-trip latency of the test query in milliseconds.",
     )
 
-    server_version: Optional[str] = Field(
+    server_version: str | None = Field(
         default=None,
         description="Version string reported by the database server.",
     )
@@ -251,7 +249,7 @@ class ColumnInfo(BaseModel):
         description="Native data type string from the database (e.g. 'VARCHAR(255)', 'INT').",
     )
 
-    logical_type: Optional[ColumnDataType] = Field(
+    logical_type: ColumnDataType | None = Field(
         default=None,
         description="Mapped logical data type used by the modelling layer.",
     )
@@ -266,12 +264,12 @@ class ColumnInfo(BaseModel):
         description="Whether this column is (part of) the primary key.",
     )
 
-    default_value: Optional[str] = Field(
+    default_value: str | None = Field(
         default=None,
         description="Default value expression, if any.",
     )
 
-    comment: Optional[str] = Field(
+    comment: str | None = Field(
         default=None,
         description="Column comment / description stored in the database.",
     )
@@ -281,22 +279,22 @@ class ColumnInfo(BaseModel):
         description="Zero-based position of the column within the table.",
     )
 
-    character_max_length: Optional[int] = Field(
+    character_max_length: int | None = Field(
         default=None,
         description="Maximum character length for string-type columns.",
     )
 
-    numeric_precision: Optional[int] = Field(
+    numeric_precision: int | None = Field(
         default=None,
         description="Total number of significant digits for numeric columns.",
     )
 
-    numeric_scale: Optional[int] = Field(
+    numeric_scale: int | None = Field(
         default=None,
         description="Number of digits after the decimal point for numeric columns.",
     )
 
-    extra: Dict[str, Any] = Field(
+    extra: dict[str, Any] = Field(
         default_factory=dict,
         description="Engine-specific column attributes (e.g. auto_increment, unsigned).",
     )
@@ -315,7 +313,7 @@ class IndexInfo(BaseModel):
         description="Type of the index (PRIMARY, UNIQUE, NORMAL, etc.).",
     )
 
-    columns: List[str] = Field(
+    columns: list[str] = Field(
         default_factory=list,
         description="Ordered list of column names that make up the index.",
     )
@@ -325,7 +323,7 @@ class IndexInfo(BaseModel):
         description="Whether the index enforces uniqueness.",
     )
 
-    comment: Optional[str] = Field(
+    comment: str | None = Field(
         default=None,
         description="Optional comment attached to the index.",
     )
@@ -334,7 +332,7 @@ class IndexInfo(BaseModel):
 class TableSchema(BaseModel):
     """Full metadata representation of a database table."""
 
-    connection_id: Optional[str] = Field(
+    connection_id: str | None = Field(
         default=None,
         description="ID of the connection this table belongs to.",
     )
@@ -344,7 +342,7 @@ class TableSchema(BaseModel):
         description="Name of the database / catalog containing this table.",
     )
 
-    schema_name: Optional[str] = Field(
+    schema_name: str | None = Field(
         default=None,
         description="Schema name (PostgreSQL / SQL Server / Oracle).",
     )
@@ -359,42 +357,42 @@ class TableSchema(BaseModel):
         description="Type of the table object: TABLE, VIEW, MATERIALIZED VIEW, etc.",
     )
 
-    comment: Optional[str] = Field(
+    comment: str | None = Field(
         default=None,
         description="Table-level comment / description.",
     )
 
-    columns: List[ColumnInfo] = Field(
+    columns: list[ColumnInfo] = Field(
         default_factory=list,
         description="Ordered list of columns in the table.",
     )
 
-    indexes: List[IndexInfo] = Field(
+    indexes: list[IndexInfo] = Field(
         default_factory=list,
         description="Indexes defined on the table.",
     )
 
-    row_count_estimate: Optional[int] = Field(
+    row_count_estimate: int | None = Field(
         default=None,
         description="Approximate row count (from engine statistics, not a live COUNT).",
     )
 
-    size_bytes: Optional[int] = Field(
+    size_bytes: int | None = Field(
         default=None,
         description="Total size of the table on disk in bytes.",
     )
 
-    warehouse_layer: Optional[WarehouseLayer] = Field(
+    warehouse_layer: WarehouseLayer | None = Field(
         default=None,
         description="Data-warehouse layer this table belongs to (ODS / DWD / DWS / ADS).",
     )
 
-    created_at: Optional[datetime] = Field(
+    created_at: datetime | None = Field(
         default=None,
         description="When the table was first discovered / created.",
     )
 
-    updated_at: Optional[datetime] = Field(
+    updated_at: datetime | None = Field(
         default=None,
         description="When the metadata was last refreshed.",
     )
@@ -405,9 +403,9 @@ class TableStats(BaseModel):
 
     table_name: str = Field(..., description="Table name.")
     row_count: int = Field(default=0, description="Exact or estimated row count.")
-    size_bytes: Optional[int] = Field(default=None, description="Table size on disk in bytes.")
-    avg_row_size_bytes: Optional[float] = Field(default=None, description="Average row size.")
-    last_analyzed: Optional[datetime] = Field(default=None, description="When statistics were last computed.")
+    size_bytes: int | None = Field(default=None, description="Table size on disk in bytes.")
+    avg_row_size_bytes: float | None = Field(default=None, description="Average row size.")
+    last_analyzed: datetime | None = Field(default=None, description="When statistics were last computed.")
 
 
 # ====================================================================== #
@@ -430,7 +428,7 @@ class SQLGenerationRequest(BaseModel):
         description="Target database engine (affects SQL dialect).",
     )
 
-    context_tables: List[TableSchema] = Field(
+    context_tables: list[TableSchema] = Field(
         default_factory=list,
         description=(
             "Relevant table schemas that the model should consider. "
@@ -438,12 +436,12 @@ class SQLGenerationRequest(BaseModel):
         ),
     )
 
-    target_table: Optional[str] = Field(
+    target_table: str | None = Field(
         default=None,
         description="If generating an INSERT / MERGE, the target table name.",
     )
 
-    warehouse_layer: Optional[WarehouseLayer] = Field(
+    warehouse_layer: WarehouseLayer | None = Field(
         default=None,
         description="Warehouse layer context — helps the model follow naming conventions.",
     )
@@ -460,7 +458,7 @@ class SQLGenerationRequest(BaseModel):
         description="Maximum number of SQL variants to generate.",
     )
 
-    model_override: Optional[str] = Field(
+    model_override: str | None = Field(
         default=None,
         description="Override the default LLM model for this request.",
     )
@@ -486,17 +484,17 @@ class SQLGenerationResult(BaseModel):
         description="Model's self-assessed confidence in the correctness of the SQL.",
     )
 
-    warnings: List[str] = Field(
+    warnings: list[str] = Field(
         default_factory=list,
         description="Potential issues or assumptions the model identified.",
     )
 
-    referenced_tables: List[str] = Field(
+    referenced_tables: list[str] = Field(
         default_factory=list,
         description="Table names referenced in the generated SQL.",
     )
 
-    referenced_columns: List[str] = Field(
+    referenced_columns: list[str] = Field(
         default_factory=list,
         description="Column names referenced in the generated SQL.",
     )
@@ -510,7 +508,7 @@ class SQLGenerationResponse(BaseModel):
         description="Unique identifier for this generation request.",
     )
 
-    results: List[SQLGenerationResult] = Field(
+    results: list[SQLGenerationResult] = Field(
         default_factory=list,
         description="List of generated SQL candidates, ordered by confidence.",
     )
@@ -546,7 +544,7 @@ class DataModelingRequest(BaseModel):
         description="Natural-language description of the business requirement.",
     )
 
-    source_tables: List[TableSchema] = Field(
+    source_tables: list[TableSchema] = Field(
         default_factory=list,
         description="Source table schemas available for the model to reference.",
     )
@@ -556,7 +554,7 @@ class DataModelingRequest(BaseModel):
         description="Target warehouse layer for the modelled output.",
     )
 
-    naming_convention: Optional[str] = Field(
+    naming_convention: str | None = Field(
         default=None,
         description=(
             "Naming convention template (e.g. '{layer}_{domain}_{table_desc}'). "
@@ -574,20 +572,20 @@ class DimensionModel(BaseModel):
     """A dimension table produced by the modelling step."""
 
     table_name: str = Field(..., description="Generated dimension table name.")
-    columns: List[ColumnInfo] = Field(default_factory=list, description="Column definitions.")
+    columns: list[ColumnInfo] = Field(default_factory=list, description="Column definitions.")
     description: str = Field(default="", description="Business description of the dimension.")
-    grain: Optional[str] = Field(default=None, description="Grain / granularity of the dimension.")
+    grain: str | None = Field(default=None, description="Grain / granularity of the dimension.")
 
 
 class FactModel(BaseModel):
     """A fact table produced by the modelling step."""
 
     table_name: str = Field(..., description="Generated fact table name.")
-    columns: List[ColumnInfo] = Field(default_factory=list, description="Column definitions.")
+    columns: list[ColumnInfo] = Field(default_factory=list, description="Column definitions.")
     description: str = Field(default="", description="Business description of the fact table.")
-    grain: Optional[str] = Field(default=None, description="Grain / granularity of the fact table.")
-    measures: List[str] = Field(default_factory=list, description="Column names that are measures / metrics.")
-    foreign_keys: Dict[str, str] = Field(
+    grain: str | None = Field(default=None, description="Grain / granularity of the fact table.")
+    measures: list[str] = Field(default_factory=list, description="Column names that are measures / metrics.")
+    foreign_keys: dict[str, str] = Field(
         default_factory=dict,
         description="Mapping of FK column name -> referenced dimension table name.",
     )
@@ -601,17 +599,17 @@ class DataModelingResponse(BaseModel):
         description="Unique identifier for this modelling request.",
     )
 
-    dimensions: List[DimensionModel] = Field(
+    dimensions: list[DimensionModel] = Field(
         default_factory=list,
         description="Proposed dimension tables.",
     )
 
-    facts: List[FactModel] = Field(
+    facts: list[FactModel] = Field(
         default_factory=list,
         description="Proposed fact tables.",
     )
 
-    ddl_statements: List[str] = Field(
+    ddl_statements: list[str] = Field(
         default_factory=list,
         description="Generated DDL CREATE TABLE statements ready for execution.",
     )
@@ -653,7 +651,7 @@ class LineageNode(BaseModel):
         description="Display label for the node.",
     )
 
-    metadata: Dict[str, Any] = Field(
+    metadata: dict[str, Any] = Field(
         default_factory=dict,
         description="Additional metadata (warehouse layer, row count, owner, etc.).",
     )
@@ -687,12 +685,12 @@ class LineageEdge(BaseModel):
         description="Type of relationship (DATA_FLOW, DERIVED_FROM, FK_REFERENCE, etc.).",
     )
 
-    transformation: Optional[str] = Field(
+    transformation: str | None = Field(
         default=None,
         description="Brief description or SQL snippet that transforms source into target.",
     )
 
-    metadata: Dict[str, Any] = Field(
+    metadata: dict[str, Any] = Field(
         default_factory=dict,
         description="Additional edge metadata.",
     )
@@ -715,12 +713,12 @@ class LineageGraph(BaseModel):
         description="Scope of the graph (e.g. 'full', 'table:orders', 'layer:DWD').",
     )
 
-    nodes: List[LineageNode] = Field(
+    nodes: list[LineageNode] = Field(
         default_factory=list,
         description="All nodes in the graph.",
     )
 
-    edges: List[LineageEdge] = Field(
+    edges: list[LineageEdge] = Field(
         default_factory=list,
         description="All directed edges in the graph.",
     )
@@ -787,12 +785,12 @@ class ETLTaskConfig(BaseModel):
         description="Write mode: 'append', 'overwrite', 'upsert', or 'merge'.",
     )
 
-    warehouse_layer: Optional[WarehouseLayer] = Field(
+    warehouse_layer: WarehouseLayer | None = Field(
         default=None,
         description="Warehouse layer of the target table.",
     )
 
-    depends_on: List[str] = Field(
+    depends_on: list[str] = Field(
         default_factory=list,
         description="Task IDs that must complete before this task can start.",
     )
@@ -821,7 +819,7 @@ class ETLTaskConfig(BaseModel):
         description="Whether this task is active in the pipeline.",
     )
 
-    metadata: Dict[str, Any] = Field(
+    metadata: dict[str, Any] = Field(
         default_factory=dict,
         description="Arbitrary metadata (owner, SLA, tags, etc.).",
     )
@@ -852,12 +850,12 @@ class ETLPipeline(BaseModel):
         description="High-level description of the pipeline's purpose.",
     )
 
-    schedule_cron: Optional[str] = Field(
+    schedule_cron: str | None = Field(
         default=None,
         description="Cron expression for scheduling (e.g. '0 2 * * *' for daily at 2 AM).",
     )
 
-    tasks: List[ETLTaskConfig] = Field(
+    tasks: list[ETLTaskConfig] = Field(
         default_factory=list,
         description="Ordered list of tasks in the pipeline.",
     )
@@ -873,12 +871,12 @@ class ETLPipeline(BaseModel):
         description="What to do when a task fails: 'stop', 'continue', or 'retry_all'.",
     )
 
-    notification_channels: List[str] = Field(
+    notification_channels: list[str] = Field(
         default_factory=list,
         description="Channels to notify on pipeline completion or failure.",
     )
 
-    tags: List[str] = Field(
+    tags: list[str] = Field(
         default_factory=list,
         description="User-defined tags for categorising pipelines.",
     )
@@ -901,10 +899,10 @@ class ETLTaskRunResult(BaseModel):
     status: ETLTaskStatus = Field(..., description="Final status of the execution.")
     rows_processed: int = Field(default=0, description="Number of rows read from source.")
     rows_written: int = Field(default=0, description="Number of rows written to target.")
-    started_at: Optional[datetime] = Field(default=None, description="When execution started.")
-    finished_at: Optional[datetime] = Field(default=None, description="When execution finished.")
-    duration_seconds: Optional[float] = Field(default=None, description="Total wall-clock duration.")
-    error_message: Optional[str] = Field(default=None, description="Error details if the task failed.")
+    started_at: datetime | None = Field(default=None, description="When execution started.")
+    finished_at: datetime | None = Field(default=None, description="When execution finished.")
+    duration_seconds: float | None = Field(default=None, description="Total wall-clock duration.")
+    error_message: str | None = Field(default=None, description="Error details if the task failed.")
 
 
 # ====================================================================== #
@@ -917,13 +915,13 @@ class APIResponse(BaseModel):
 
     success: bool = Field(default=True, description="Whether the request was successful.")
     message: str = Field(default="ok", description="Human-readable status message.")
-    data: Optional[Any] = Field(default=None, description="Response payload.")
+    data: Any | None = Field(default=None, description="Response payload.")
 
 
 class PaginatedResponse(BaseModel):
     """Paginated list response."""
 
-    items: List[Any] = Field(default_factory=list, description="Page of items.")
+    items: list[Any] = Field(default_factory=list, description="Page of items.")
     total: int = Field(default=0, description="Total number of items across all pages.")
     page: int = Field(default=1, ge=1, description="Current page number (1-indexed).")
     page_size: int = Field(default=20, ge=1, le=200, description="Number of items per page.")

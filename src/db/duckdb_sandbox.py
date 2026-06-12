@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 DuckDB-based local sandbox for lightweight DDL and SQL verification.
 
@@ -26,6 +25,7 @@ Typical usage::
 
 from __future__ import annotations
 
+import contextlib
 import csv
 import logging
 import random
@@ -34,7 +34,7 @@ import string
 import time
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, ClassVar
 
 import duckdb
 from pydantic import BaseModel, Field
@@ -52,13 +52,13 @@ class DDLVerifyResult(BaseModel):
 
     success: bool
     ddl: str
-    normalized_ddl: Optional[str] = Field(
+    normalized_ddl: str | None = Field(
         default=None,
         description="DDL as normalised / accepted by DuckDB.",
     )
-    error: Optional[str] = None
-    table_name: Optional[str] = None
-    columns_created: List[str] = Field(default_factory=list)
+    error: str | None = None
+    table_name: str | None = None
+    columns_created: list[str] = Field(default_factory=list)
     execution_time_ms: float = 0.0
 
 
@@ -68,18 +68,18 @@ class SQLVerifyResult(BaseModel):
     success: bool
     sql: str
     rows_affected: int = 0
-    result_columns: List[str] = Field(default_factory=list)
-    sample_rows: List[Dict[str, Any]] = Field(default_factory=list)
-    error: Optional[str] = None
+    result_columns: list[str] = Field(default_factory=list)
+    sample_rows: list[dict[str, Any]] = Field(default_factory=list)
+    error: str | None = None
     execution_time_ms: float = 0.0
-    explain_plan: Optional[str] = None
+    explain_plan: str | None = None
 
 
 class QueryResult(BaseModel):
     """Lightweight wrapper around a SELECT result set."""
 
-    columns: List[str]
-    rows: List[Dict[str, Any]]
+    columns: list[str]
+    rows: list[dict[str, Any]]
     row_count: int
     execution_time_ms: float = 0.0
 
@@ -90,7 +90,7 @@ class BatchDDLResult(BaseModel):
     total: int
     succeeded: int
     failed: int
-    results: List[DDLVerifyResult]
+    results: list[DDLVerifyResult]
 
 
 class PipelineStep(BaseModel):
@@ -105,11 +105,11 @@ class PipelineStep(BaseModel):
     """
 
     step_type: str
-    sql: Optional[str] = None
-    table_name: Optional[str] = None
+    sql: str | None = None
+    table_name: str | None = None
     num_sample_rows: int = 100
-    expected_row_count: Optional[int] = None
-    expected_columns: Optional[List[str]] = None
+    expected_row_count: int | None = None
+    expected_columns: list[str] | None = None
 
 
 class PipelineVerifyResult(BaseModel):
@@ -118,8 +118,8 @@ class PipelineVerifyResult(BaseModel):
     success: bool
     steps_total: int
     steps_passed: int
-    step_results: List[Dict[str, Any]]
-    errors: List[str]
+    step_results: list[dict[str, Any]]
+    errors: list[str]
     total_execution_time_ms: float = 0.0
 
 
@@ -127,7 +127,7 @@ class TableInfo(BaseModel):
     """Introspection metadata for a single table inside the sandbox."""
 
     table_name: str
-    columns: List[Dict[str, Any]] = Field(
+    columns: list[dict[str, Any]] = Field(
         default_factory=list,
         description="Each dict contains: name, type, nullable, default.",
     )
@@ -155,7 +155,7 @@ class _DialectTranslator:
     # Type mapping tables
     # ------------------------------------------------------------------ #
 
-    _CLICKHOUSE_TYPE_MAP: Dict[str, str] = {
+    _CLICKHOUSE_TYPE_MAP: ClassVar[dict[str, str]] = {
         "uint8": "SMALLINT",
         "uint16": "INTEGER",
         "uint32": "INTEGER",
@@ -181,7 +181,7 @@ class _DialectTranslator:
         "nothing": "VARCHAR",
     }
 
-    _HIVE_TYPE_MAP: Dict[str, str] = {
+    _HIVE_TYPE_MAP: ClassVar[dict[str, str]] = {
         "string": "VARCHAR",
         "tinyint": "TINYINT",
         "smallint": "SMALLINT",
@@ -191,7 +191,7 @@ class _DialectTranslator:
         "timestamp": "TIMESTAMP",
     }
 
-    _MYSQL_TYPE_MAP: Dict[str, str] = {
+    _MYSQL_TYPE_MAP: ClassVar[dict[str, str]] = {
         "datetime": "TIMESTAMP",
         "mediumtext": "VARCHAR",
         "longtext": "VARCHAR",
@@ -209,7 +209,7 @@ class _DialectTranslator:
     }
 
     # Regex that strips engine-specific trailing clauses.
-    _STRIP_PATTERNS: List[re.Pattern[str]] = [
+    _STRIP_PATTERNS: ClassVar[list[re.Pattern[str]]] = [
         # ClickHouse
         re.compile(
             r"\bENGINE\s*=\s*\w+(\([^)]*\))?"
@@ -323,7 +323,7 @@ class _DialectTranslator:
     def _replace_types(cls, ddl: str) -> str:
         """Replace known engine-specific type tokens with DuckDB equivalents."""
         # Build a combined map (case-insensitive matching via regex).
-        combined: Dict[str, str] = {}
+        combined: dict[str, str] = {}
         combined.update(cls._CLICKHOUSE_TYPE_MAP)
         combined.update(cls._HIVE_TYPE_MAP)
         combined.update(cls._MYSQL_TYPE_MAP)
@@ -349,7 +349,7 @@ class _DialectTranslator:
 
 
 # A small word list for generating readable VARCHAR values.
-_WORD_POOL: List[str] = [
+_WORD_POOL: list[str] = [
     "alpha", "bravo", "charlie", "delta", "echo", "foxtrot", "golf",
     "hotel", "india", "juliet", "kilo", "lima", "mike", "november",
     "oscar", "papa", "quebec", "romeo", "sierra", "tango", "ultra",
@@ -359,12 +359,12 @@ _WORD_POOL: List[str] = [
     "price", "quantity", "status", "active", "pending", "closed",
 ]
 
-_FIRST_NAMES: List[str] = [
+_FIRST_NAMES: list[str] = [
     "Alice", "Bob", "Carol", "David", "Eve", "Frank", "Grace", "Hank",
     "Ivy", "Jack", "Karen", "Leo", "Mona", "Nick", "Olivia", "Paul",
 ]
 
-_LAST_NAMES: List[str] = [
+_LAST_NAMES: list[str] = [
     "Smith", "Johnson", "Williams", "Brown", "Jones", "Garcia", "Miller",
     "Davis", "Rodriguez", "Martinez", "Chen", "Wang", "Li", "Zhang",
 ]
@@ -424,7 +424,7 @@ class _SampleDataGenerator:
     # Introspection
     # ------------------------------------------------------------------ #
 
-    def _introspect_columns(self) -> List[Dict[str, str]]:
+    def _introspect_columns(self) -> list[dict[str, str]]:
         """Return ``[{name, type}, ...]`` for the target table."""
         try:
             result = self._conn.execute(
@@ -436,7 +436,7 @@ class _SampleDataGenerator:
             )
             return []
 
-        columns: List[Dict[str, str]] = []
+        columns: list[dict[str, str]] = []
         for row in result:
             columns.append({"name": row[0], "type": row[1].upper()})
         return columns
@@ -446,11 +446,11 @@ class _SampleDataGenerator:
     # ------------------------------------------------------------------ #
 
     def _generate_rows(
-        self, columns: List[Dict[str, str]]
-    ) -> List[Tuple[Any, ...]]:
-        rows: List[Tuple[Any, ...]] = []
+        self, columns: list[dict[str, str]]
+    ) -> list[tuple[Any, ...]]:
+        rows: list[tuple[Any, ...]] = []
         for i in range(self._num_rows):
-            row_values: List[Any] = []
+            row_values: list[Any] = []
             for col in columns:
                 row_values.append(
                     self._value_for_type(col["type"], col["name"], i)
@@ -572,8 +572,8 @@ class _SampleDataGenerator:
 
     def _bulk_insert(
         self,
-        columns: List[Dict[str, str]],
-        rows: List[Tuple[Any, ...]],
+        columns: list[dict[str, str]],
+        rows: list[tuple[Any, ...]],
     ) -> None:
         """Insert rows using DuckDB's ``executemany`` for efficiency."""
         col_names = ", ".join(f'"{c["name"]}"' for c in columns)
@@ -615,7 +615,7 @@ class _SampleDataGenerator:
     # ------------------------------------------------------------------ #
 
     @staticmethod
-    def _parse_decimal_params(col_type: str) -> Tuple[int, int]:
+    def _parse_decimal_params(col_type: str) -> tuple[int, int]:
         """Extract ``(precision, scale)`` from a ``DECIMAL(p,s)`` string."""
         match = re.search(r"\((\d+)\s*,\s*(\d+)\)", col_type)
         if match:
@@ -666,7 +666,7 @@ class DuckDBSandbox:
             sessions.
         """
         self._db_path = db_path
-        self._conn: Optional[duckdb.DuckDBPyConnection] = None
+        self._conn: duckdb.DuckDBPyConnection | None = None
         self._translator = _DialectTranslator()
         logger.debug("DuckDBSandbox initialised (path=%s).", db_path)
 
@@ -734,7 +734,7 @@ class DuckDBSandbox:
 
     # Context manager support ----------------------------------------- #
 
-    def __enter__(self) -> "DuckDBSandbox":
+    def __enter__(self) -> DuckDBSandbox:
         self.open()
         return self
 
@@ -768,15 +768,13 @@ class DuckDBSandbox:
 
             # Try to extract table name and columns for CREATE TABLE.
             table_name = self._extract_table_name(translated)
-            columns_created: List[str] = []
+            columns_created: list[str] = []
             if table_name and translated.upper().strip().startswith("CREATE"):
-                try:
+                with contextlib.suppress(Exception):
                     columns_created = [
                         c["name"]
                         for c in self._describe_raw(table_name)
                     ]
-                except Exception:
-                    pass
 
             logger.debug(
                 "DDL verified OK (%.1f ms): %s",
@@ -809,7 +807,7 @@ class DuckDBSandbox:
                 execution_time_ms=round(elapsed, 2),
             )
 
-    def verify_multiple_ddl(self, ddls: List[str]) -> List[DDLVerifyResult]:
+    def verify_multiple_ddl(self, ddls: list[str]) -> list[DDLVerifyResult]:
         """
         Verify a list of DDL statements in order, returning one result per
         statement.
@@ -817,7 +815,7 @@ class DuckDBSandbox:
         Execution stops at the first failure so that dependent statements
         are not run against a broken schema.
         """
-        results: List[DDLVerifyResult] = []
+        results: list[DDLVerifyResult] = []
         for ddl in ddls:
             result = self.verify_ddl(ddl)
             results.append(result)
@@ -830,7 +828,7 @@ class DuckDBSandbox:
                 break
         return results
 
-    def batch_execute_ddl(self, ddls: List[str]) -> BatchDDLResult:
+    def batch_execute_ddl(self, ddls: list[str]) -> BatchDDLResult:
         """
         Execute a batch of DDL statements (e.g. a full warehouse-layer setup).
 
@@ -838,7 +836,7 @@ class DuckDBSandbox:
         failures so that the caller gets a complete picture of which
         statements succeeded and which did not.
         """
-        results: List[DDLVerifyResult] = []
+        results: list[DDLVerifyResult] = []
         for ddl in ddls:
             results.append(self.verify_ddl(ddl))
 
@@ -857,7 +855,7 @@ class DuckDBSandbox:
     def verify_computation_sql(
         self,
         sql: str,
-        expected_columns: Optional[List[str]] = None,
+        expected_columns: list[str] | None = None,
     ) -> SQLVerifyResult:
         """
         Execute a computation SQL (e.g. ``INSERT INTO ... SELECT ...``)
@@ -876,7 +874,7 @@ class DuckDBSandbox:
         start = time.perf_counter()
 
         # Capture EXPLAIN plan (best-effort, SELECT only).
-        explain_plan: Optional[str] = None
+        explain_plan: str | None = None
         upper_sql = sql.strip().upper()
         if upper_sql.startswith("SELECT") or upper_sql.startswith("WITH"):
             try:
@@ -896,8 +894,8 @@ class DuckDBSandbox:
             elapsed = (time.perf_counter() - start) * 1000
 
             # Determine rows affected / result columns.
-            result_columns: List[str] = []
-            sample_rows: List[Dict[str, Any]] = []
+            result_columns: list[str] = []
+            sample_rows: list[dict[str, Any]] = []
             rows_affected = 0
 
             if result.description:
@@ -907,7 +905,7 @@ class DuckDBSandbox:
                 if upper_sql.startswith("SELECT") or upper_sql.startswith("WITH"):
                     fetched = result.fetchmany(10)
                     sample_rows = [
-                        dict(zip(result_columns, row)) for row in fetched
+                        dict(zip(result_columns, row, strict=False)) for row in fetched
                     ]
                     rows_affected = len(sample_rows)
                 else:
@@ -916,7 +914,7 @@ class DuckDBSandbox:
                 rows_affected = 0
 
             # Column validation.
-            error: Optional[str] = None
+            error: str | None = None
             if expected_columns is not None:
                 expected_lower = {c.lower() for c in expected_columns}
                 actual_lower = {c.lower() for c in result_columns}
@@ -984,12 +982,12 @@ class DuckDBSandbox:
             result = self._conn.execute(sql)
             elapsed = (time.perf_counter() - start) * 1000
 
-            columns: List[str] = []
+            columns: list[str] = []
             if result.description:
                 columns = [desc[0] for desc in result.description]
 
             fetched = result.fetchmany(max_rows)
-            rows = [dict(zip(columns, row)) for row in fetched]
+            rows = [dict(zip(columns, row, strict=False)) for row in fetched]
 
             return QueryResult(
                 columns=columns,
@@ -1097,7 +1095,7 @@ class DuckDBSandbox:
         return self.insert_from_dicts(table_name, rows)
 
     def insert_from_dicts(
-        self, table_name: str, rows: List[Dict[str, Any]]
+        self, table_name: str, rows: list[dict[str, Any]]
     ) -> int:
         """
         Insert data from a list of dictionaries.
@@ -1131,7 +1129,7 @@ class DuckDBSandbox:
     # ------------------------------------------------------------------ #
 
     def verify_pipeline(
-        self, steps: List[PipelineStep]
+        self, steps: list[PipelineStep]
     ) -> PipelineVerifyResult:
         """
         Verify a complete ETL pipeline end-to-end.
@@ -1152,8 +1150,8 @@ class DuckDBSandbox:
         outcomes.
         """
         start_all = time.perf_counter()
-        step_results: List[Dict[str, Any]] = []
-        errors: List[str] = []
+        step_results: list[dict[str, Any]] = []
+        errors: list[str] = []
         passed = 0
 
         for idx, step in enumerate(steps):
@@ -1206,7 +1204,7 @@ class DuckDBSandbox:
 
     def _execute_pipeline_step(
         self, step: PipelineStep
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Dispatch a single pipeline step to the appropriate handler."""
         kind = step.step_type.lower()
 
@@ -1258,11 +1256,11 @@ class DuckDBSandbox:
     def _verify_table_expectations(
         self,
         table_name: str,
-        expected_row_count: Optional[int] = None,
-        expected_columns: Optional[List[str]] = None,
-    ) -> Dict[str, Any]:
+        expected_row_count: int | None = None,
+        expected_columns: list[str] | None = None,
+    ) -> dict[str, Any]:
         """Check that a table meets expected row-count and column criteria."""
-        errors: List[str] = []
+        errors: list[str] = []
 
         # Column check
         if expected_columns is not None:
@@ -1295,7 +1293,7 @@ class DuckDBSandbox:
     # Introspection
     # ------------------------------------------------------------------ #
 
-    def list_tables(self) -> List[str]:
+    def list_tables(self) -> list[str]:
         """Return the names of all user-created tables in the sandbox."""
         self._ensure_open()
         assert self._conn is not None
@@ -1443,7 +1441,7 @@ class DuckDBSandbox:
                 "context manager before executing queries."
             )
 
-    def _describe_raw(self, table_name: str) -> List[Dict[str, Any]]:
+    def _describe_raw(self, table_name: str) -> list[dict[str, Any]]:
         """
         Run ``DESCRIBE`` on a table and return raw column dicts.
 
@@ -1454,7 +1452,7 @@ class DuckDBSandbox:
             f'DESCRIBE "{table_name}"'
         ).fetchall()
 
-        columns: List[Dict[str, Any]] = []
+        columns: list[dict[str, Any]] = []
         for row in rows:
             # DESCRIBE returns: (name, type, nullable_str, default, key, extra)
             columns.append(
@@ -1496,7 +1494,7 @@ class DuckDBSandbox:
             return 0
 
     @staticmethod
-    def _extract_table_name(ddl: str) -> Optional[str]:
+    def _extract_table_name(ddl: str) -> str | None:
         """
         Extract the table name from a DDL statement using regex.
 

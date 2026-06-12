@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
+from typing import Any, ClassVar
 
 from src.agents.base import AgentResult, ManagedAgent
 
@@ -62,13 +62,13 @@ class GovernanceAgentWrapper(ManagedAgent):
 
     name = "data_governance"
     description = "数据治理：扫描所有表，识别冗余表和重叠结构，给出合并/归档建议。"
-    intent_keywords = [
+    intent_keywords: ClassVar[list[str]] = [
         "冗余", "重复", "治理", "重叠", "合并",
         "清理", "归档", "废弃", "冗余表", "对比表",
         "哪些表重复", "表太多", "优化表", "整理",
     ]
 
-    def __init__(self, llm: Any, db: Any, convention_file: Optional[str] = None):
+    def __init__(self, llm: Any, db: Any, convention_file: str | None = None):
         self._llm = llm
         self._db = db
         self._convention_file = convention_file

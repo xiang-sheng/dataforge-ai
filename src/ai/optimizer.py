@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 DataForge AI - SQL query optimizer.
 
@@ -11,11 +10,11 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any, Dict, List, Optional
+from enum import StrEnum
+from typing import Any
 
-from src.ai.provider import BaseAIProvider, ChatMessage
 from src.ai.prompts import default_registry as prompt_registry
+from src.ai.provider import BaseAIProvider, ChatMessage
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +23,7 @@ logger = logging.getLogger(__name__)
 # Data models
 # ---------------------------------------------------------------------------
 
-class QueryComplexity(str, Enum):
+class QueryComplexity(StrEnum):
     """Classification of SQL query complexity."""
 
     SIMPLE = "simple"
@@ -33,7 +32,7 @@ class QueryComplexity(str, Enum):
     VERY_COMPLEX = "very_complex"
 
 
-class OptimizationGoal(str, Enum):
+class OptimizationGoal(StrEnum):
     """Common optimization objectives."""
 
     LATENCY = "latency"
@@ -62,14 +61,14 @@ class QueryAnalysis:
 
     complexity: QueryComplexity = QueryComplexity.SIMPLE
     estimated_cost: int = 0
-    operations: List[str] = field(default_factory=list)
-    bottleneck_operations: List[str] = field(default_factory=list)
-    table_references: List[str] = field(default_factory=list)
+    operations: list[str] = field(default_factory=list)
+    bottleneck_operations: list[str] = field(default_factory=list)
+    table_references: list[str] = field(default_factory=list)
     join_count: int = 0
     subquery_count: int = 0
     has_window_functions: bool = False
     has_cte: bool = False
-    warnings: List[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -108,7 +107,7 @@ class OptimizationResult:
 
     original_sql: str = ""
     analysis: QueryAnalysis = field(default_factory=QueryAnalysis)
-    suggestions: List[OptimizationSuggestion] = field(default_factory=list)
+    suggestions: list[OptimizationSuggestion] = field(default_factory=list)
     optimized_sql: str = ""
     estimated_improvement: str = ""
     raw_response: str = ""
@@ -129,8 +128,8 @@ class TableStatistics:
     table_name: str = ""
     row_count: int = 0
     size_bytes: int = 0
-    column_stats: Dict[str, Dict[str, Any]] = field(default_factory=dict)
-    partition_info: Optional[str] = None
+    column_stats: dict[str, dict[str, Any]] = field(default_factory=dict)
+    partition_info: str | None = None
 
     def to_summary_string(self) -> str:
         """Serialize to a concise summary string for prompt injection.
@@ -310,7 +309,7 @@ class SQLOptimizer:
     async def analyze_query(
         self,
         sql: str,
-        execution_plan: Optional[str] = None,
+        execution_plan: str | None = None,
         dialect: str = "PostgreSQL",
     ) -> QueryAnalysis:
         """Analyze a SQL query combining static analysis with AI insights.
@@ -365,9 +364,9 @@ class SQLOptimizer:
     async def suggest_optimizations(
         self,
         sql: str,
-        table_stats: Optional[List[TableStatistics]] = None,
+        table_stats: list[TableStatistics] | None = None,
         dialect: str = "PostgreSQL",
-        goals: Optional[List[OptimizationGoal]] = None,
+        goals: list[OptimizationGoal] | None = None,
     ) -> OptimizationResult:
         """Analyze a query and provide optimization suggestions.
 
@@ -428,7 +427,7 @@ class SQLOptimizer:
     async def rewrite_query(
         self,
         sql: str,
-        optimization_goals: Optional[List[OptimizationGoal]] = None,
+        optimization_goals: list[OptimizationGoal] | None = None,
         dialect: str = "PostgreSQL",
         constraints: str = "",
     ) -> str:
@@ -500,9 +499,9 @@ class SQLOptimizer:
     # -- Internal helpers ---------------------------------------------------
 
     @staticmethod
-    def _extract_warnings(text: str) -> List[str]:
+    def _extract_warnings(text: str) -> list[str]:
         """Extract warning / issue lines from the AI analysis response."""
-        warnings: List[str] = []
+        warnings: list[str] = []
         for line in text.splitlines():
             stripped = line.strip()
             if any(
@@ -515,7 +514,7 @@ class SQLOptimizer:
         return warnings
 
     @staticmethod
-    def _parse_suggestions(text: str) -> List[OptimizationSuggestion]:
+    def _parse_suggestions(text: str) -> list[OptimizationSuggestion]:
         """Parse optimization suggestions from the AI response.
 
         Looks for numbered or headed sections that describe individual
@@ -527,7 +526,7 @@ class SQLOptimizer:
         Returns:
             A list of ``OptimizationSuggestion`` objects.
         """
-        suggestions: List[OptimizationSuggestion] = []
+        suggestions: list[OptimizationSuggestion] = []
 
         # Split on numbered headers or bold headers
         sections = re.split(

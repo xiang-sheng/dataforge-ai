@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 DataForge AI - AI provider abstraction layer (LangChain edition).
 
@@ -19,29 +18,26 @@ import logging
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from typing import (
+    TYPE_CHECKING,
     Any,
-    AsyncIterator,
-    Callable,
-    Dict,
-    List,
-    Optional,
-    Sequence,
-    Type,
-    Union,
+    ClassVar,
 )
 
 from langchain_core.callbacks import BaseCallbackHandler
-from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import (
     AIMessage,
-    AIMessageChunk,
     BaseMessage,
     HumanMessage,
     SystemMessage,
 )
-from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult, LLMResult
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator, Callable, Sequence
+
+    from langchain_core.language_models.chat_models import BaseChatModel
+    from langchain_core.outputs import LLMResult
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +46,7 @@ logger = logging.getLogger(__name__)
 # Data models
 # ---------------------------------------------------------------------------
 
-class ModelProvider(str, Enum):
+class ModelProvider(StrEnum):
     """Supported AI model providers."""
 
     OPENAI = "openai"
@@ -76,7 +72,7 @@ class TokenUsage:
     completion_tokens: int = 0
     total_tokens: int = 0
 
-    def __add__(self, other: "TokenUsage") -> "TokenUsage":
+    def __add__(self, other: TokenUsage) -> TokenUsage:
         return TokenUsage(
             prompt_tokens=self.prompt_tokens + other.prompt_tokens,
             completion_tokens=self.completion_tokens + other.completion_tokens,
@@ -96,11 +92,11 @@ class ChatMessage:
 
     role: str  # "system" | "user" | "assistant"
     content: str
-    name: Optional[str] = None
+    name: str | None = None
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Serialize the message to a plain dictionary."""
-        payload: Dict[str, Any] = {"role": self.role, "content": self.content}
+        payload: dict[str, Any] = {"role": self.role, "content": self.content}
         if self.name:
             payload["name"] = self.name
         return payload
@@ -132,8 +128,8 @@ class AIResponse:
     content: str
     model: str
     usage: TokenUsage
-    finish_reason: Optional[str] = None
-    raw: Optional[Any] = None
+    finish_reason: str | None = None
+    raw: Any | None = None
 
 
 @dataclass
@@ -147,8 +143,8 @@ class StreamChunk:
     """
 
     delta: str = ""
-    finish_reason: Optional[str] = None
-    usage: Optional[TokenUsage] = None
+    finish_reason: str | None = None
+    usage: TokenUsage | None = None
 
 
 @dataclass
@@ -171,8 +167,8 @@ class ProviderConfig:
     """
 
     provider: ModelProvider = ModelProvider.OPENAI
-    api_key: Optional[str] = None
-    base_url: Optional[str] = None
+    api_key: str | None = None
+    base_url: str | None = None
     model: str = "gpt-4o"
     temperature: float = 0.2
     max_tokens: int = 4096
@@ -181,7 +177,7 @@ class ProviderConfig:
     retry_delay: float = 1.0
     rate_limit_rpm: int = 60
     rate_limit_tpm: int = 100_000
-    extra: Dict[str, Any] = field(default_factory=dict)
+    extra: dict[str, Any] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -202,12 +198,12 @@ class RateLimiter:
     def __init__(self, rpm: int = 0, tpm: int = 0) -> None:
         self._rpm = rpm
         self._tpm = tpm
-        self._request_timestamps: List[float] = []
-        self._token_records: List[tuple[float, int]] = []
+        self._request_timestamps: list[float] = []
+        self._token_records: list[tuple[float, int]] = []
         self._lock = asyncio.Lock()
 
     @staticmethod
-    def _prune_window(records: List, window_seconds: float = 60.0) -> None:
+    def _prune_window(records: list, window_seconds: float = 60.0) -> None:
         """Remove entries older than *window_seconds* from *records* in-place."""
         cutoff = time.monotonic() - window_seconds
         while records and records[0] < cutoff:
@@ -380,10 +376,10 @@ class BaseAIProvider(ABC):
         self,
         prompt: str,
         *,
-        system: Optional[str] = None,
-        temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None,
-        stop: Optional[Sequence[str]] = None,
+        system: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        stop: Sequence[str] | None = None,
         **kwargs: Any,
     ) -> AIResponse:
         """Generate a completion from a single prompt string.
@@ -403,11 +399,11 @@ class BaseAIProvider(ABC):
     @abstractmethod
     async def chat(
         self,
-        messages: List[ChatMessage],
+        messages: list[ChatMessage],
         *,
-        temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None,
-        stop: Optional[Sequence[str]] = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        stop: Sequence[str] | None = None,
         **kwargs: Any,
     ) -> AIResponse:
         """Generate a completion from a multi-turn chat conversation.
@@ -428,11 +424,11 @@ class BaseAIProvider(ABC):
     async def complete(
         self,
         prompt: str,
-        suffix: Optional[str] = None,
+        suffix: str | None = None,
         *,
-        temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None,
-        stop: Optional[Sequence[str]] = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        stop: Sequence[str] | None = None,
         **kwargs: Any,
     ) -> AIResponse:
         """Perform a raw text completion (insert / fill-in-the-middle).
@@ -457,9 +453,9 @@ class BaseAIProvider(ABC):
         self,
         prompt: str,
         *,
-        system: Optional[str] = None,
-        temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None,
+        system: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[StreamChunk]:
         """Stream a completion from a single prompt, yielding chunks.
@@ -478,10 +474,10 @@ class BaseAIProvider(ABC):
     @abstractmethod
     async def stream_chat(
         self,
-        messages: List[ChatMessage],
+        messages: list[ChatMessage],
         *,
-        temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[StreamChunk]:
         """Stream a chat completion, yielding chunks.
@@ -522,7 +518,7 @@ class BaseAIProvider(ABC):
         Raises:
             Exception: The last exception if all retries are exhausted.
         """
-        last_exc: Optional[Exception] = None
+        last_exc: Exception | None = None
         for attempt in range(1, self._config.max_retries + 1):
             try:
                 return await fn(*args, **kwargs)
@@ -568,7 +564,7 @@ class LLMFactory:
     def create_chat_model(
         config: ProviderConfig,
         *,
-        callbacks: Optional[List[BaseCallbackHandler]] = None,
+        callbacks: list[BaseCallbackHandler] | None = None,
     ) -> BaseChatModel:
         """Instantiate and return a LangChain ``BaseChatModel``.
 
@@ -587,7 +583,7 @@ class LLMFactory:
                 installed.
         """
         provider = config.provider
-        common_kwargs: Dict[str, Any] = {
+        common_kwargs: dict[str, Any] = {
             "temperature": config.temperature,
             "max_tokens": config.max_tokens,
             "request_timeout": config.timeout,
@@ -620,7 +616,7 @@ class LLMFactory:
     @staticmethod
     def _create_openai(
         config: ProviderConfig,
-        common_kwargs: Dict[str, Any],
+        common_kwargs: dict[str, Any],
     ) -> BaseChatModel:
         """Create a :class:`ChatOpenAI` instance."""
         try:
@@ -631,7 +627,7 @@ class LLMFactory:
                 "Install it with:  pip install langchain-openai>=0.3.0"
             ) from exc
 
-        kwargs: Dict[str, Any] = {
+        kwargs: dict[str, Any] = {
             "model": config.model,
             **common_kwargs,
         }
@@ -644,7 +640,7 @@ class LLMFactory:
     @staticmethod
     def _create_azure_openai(
         config: ProviderConfig,
-        common_kwargs: Dict[str, Any],
+        common_kwargs: dict[str, Any],
     ) -> BaseChatModel:
         """Create an :class:`AzureChatOpenAI` instance."""
         try:
@@ -655,7 +651,7 @@ class LLMFactory:
                 "Install it with:  pip install langchain-openai>=0.3.0"
             ) from exc
 
-        kwargs: Dict[str, Any] = {
+        kwargs: dict[str, Any] = {
             "model": config.model,
             **common_kwargs,
         }
@@ -673,7 +669,7 @@ class LLMFactory:
     @staticmethod
     def _create_ollama(
         config: ProviderConfig,
-        common_kwargs: Dict[str, Any],
+        common_kwargs: dict[str, Any],
     ) -> BaseChatModel:
         """Create a :class:`ChatOllama` instance for local model inference."""
         try:
@@ -698,7 +694,7 @@ class LLMFactory:
     @staticmethod
     def _create_tongyi(
         config: ProviderConfig,
-        common_kwargs: Dict[str, Any],
+        common_kwargs: dict[str, Any],
     ) -> BaseChatModel:
         """Create a :class:`ChatTongyi` instance for Alibaba Tongyi (通义千问)."""
         try:
@@ -709,7 +705,7 @@ class LLMFactory:
                 "Install it with:  pip install langchain-community>=0.3.0"
             ) from exc
 
-        kwargs: Dict[str, Any] = {
+        kwargs: dict[str, Any] = {
             "model": config.model,
             **common_kwargs,
         }
@@ -720,7 +716,7 @@ class LLMFactory:
     @staticmethod
     def _create_deepseek(
         config: ProviderConfig,
-        common_kwargs: Dict[str, Any],
+        common_kwargs: dict[str, Any],
     ) -> BaseChatModel:
         """Create a :class:`ChatOpenAI` instance pointed at the DeepSeek API.
 
@@ -735,7 +731,7 @@ class LLMFactory:
                 "Install it with:  pip install langchain-openai>=0.3.0"
             ) from exc
 
-        kwargs: Dict[str, Any] = {
+        kwargs: dict[str, Any] = {
             "model": config.model,
             **common_kwargs,
         }
@@ -777,7 +773,7 @@ class LangChainProvider(BaseAIProvider):
     def __init__(self, config: ProviderConfig) -> None:
         super().__init__(config)
         self._callback_handler = TokenUsageCallbackHandler()
-        self._model: Optional[BaseChatModel] = None
+        self._model: BaseChatModel | None = None
 
     @property
     def model(self) -> BaseChatModel:
@@ -800,10 +796,10 @@ class LangChainProvider(BaseAIProvider):
     def _build_messages(
         prompt: str,
         *,
-        system: Optional[str] = None,
-    ) -> List[BaseMessage]:
+        system: str | None = None,
+    ) -> list[BaseMessage]:
         """Construct a LangChain message list from a single prompt string."""
-        messages: List[BaseMessage] = []
+        messages: list[BaseMessage] = []
         if system:
             messages.append(SystemMessage(content=system))
         messages.append(HumanMessage(content=prompt))
@@ -811,8 +807,8 @@ class LangChainProvider(BaseAIProvider):
 
     @staticmethod
     def _chat_messages_to_langchain(
-        messages: List[ChatMessage],
-    ) -> List[BaseMessage]:
+        messages: list[ChatMessage],
+    ) -> list[BaseMessage]:
         """Convert a list of :class:`ChatMessage` to LangChain message objects."""
         return [m.to_langchain_message() for m in messages]
 
@@ -834,7 +830,7 @@ class LangChainProvider(BaseAIProvider):
         return self._callback_handler.last_usage
 
     @staticmethod
-    def _extract_finish_reason(ai_message: AIMessage) -> Optional[str]:
+    def _extract_finish_reason(ai_message: AIMessage) -> str | None:
         """Extract a finish-reason string from an ``AIMessage``."""
         response_metadata = getattr(ai_message, "response_metadata", {}) or {}
         # OpenAI-style
@@ -847,16 +843,16 @@ class LangChainProvider(BaseAIProvider):
     def _build_model_overrides(
         self,
         *,
-        temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None,
-        stop: Optional[Sequence[str]] = None,
-    ) -> Dict[str, Any]:
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        stop: Sequence[str] | None = None,
+    ) -> dict[str, Any]:
         """Build a dict of per-request model parameter overrides.
 
         These are forwarded to LangChain's ``invoke`` / ``stream`` via the
         model's ``bind`` mechanism or as config overrides.
         """
-        overrides: Dict[str, Any] = {}
+        overrides: dict[str, Any] = {}
         if temperature is not None:
             overrides["temperature"] = temperature
         if max_tokens is not None:
@@ -867,7 +863,7 @@ class LangChainProvider(BaseAIProvider):
 
     def _get_effective_model(
         self,
-        overrides: Dict[str, Any],
+        overrides: dict[str, Any],
     ) -> BaseChatModel:
         """Return the chat model, optionally bound with per-request overrides."""
         model = self.model
@@ -881,10 +877,10 @@ class LangChainProvider(BaseAIProvider):
         self,
         prompt: str,
         *,
-        system: Optional[str] = None,
-        temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None,
-        stop: Optional[Sequence[str]] = None,
+        system: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        stop: Sequence[str] | None = None,
         **kwargs: Any,
     ) -> AIResponse:
         """Generate a completion from a single prompt string.
@@ -918,11 +914,11 @@ class LangChainProvider(BaseAIProvider):
 
     async def chat(
         self,
-        messages: List[ChatMessage],
+        messages: list[ChatMessage],
         *,
-        temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None,
-        stop: Optional[Sequence[str]] = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        stop: Sequence[str] | None = None,
         **kwargs: Any,
     ) -> AIResponse:
         """Generate a completion from a multi-turn chat conversation."""
@@ -954,11 +950,11 @@ class LangChainProvider(BaseAIProvider):
     async def complete(
         self,
         prompt: str,
-        suffix: Optional[str] = None,
+        suffix: str | None = None,
         *,
-        temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None,
-        stop: Optional[Sequence[str]] = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        stop: Sequence[str] | None = None,
         **kwargs: Any,
     ) -> AIResponse:
         """Perform a fill-in-the-middle style completion.
@@ -983,9 +979,9 @@ class LangChainProvider(BaseAIProvider):
         self,
         prompt: str,
         *,
-        system: Optional[str] = None,
-        temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None,
+        system: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[StreamChunk]:
         """Stream a completion from a single prompt, yielding chunks."""
@@ -1003,7 +999,7 @@ class LangChainProvider(BaseAIProvider):
             delta_text = chunk.content if isinstance(chunk.content, str) else ""
             accumulated_tokens += max(1, len(delta_text) // 4) if delta_text else 0
 
-            finish_reason: Optional[str] = None
+            finish_reason: str | None = None
             response_metadata = getattr(chunk, "response_metadata", {}) or {}
             finish_reason = response_metadata.get("finish_reason")
 
@@ -1022,10 +1018,10 @@ class LangChainProvider(BaseAIProvider):
 
     async def stream_chat(
         self,
-        messages: List[ChatMessage],
+        messages: list[ChatMessage],
         *,
-        temperature: Optional[float] = None,
-        max_tokens: Optional[int] = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[StreamChunk]:
         """Stream a chat completion, yielding chunks."""
@@ -1044,7 +1040,7 @@ class LangChainProvider(BaseAIProvider):
             delta_text = chunk.content if isinstance(chunk.content, str) else ""
             accumulated_tokens += max(1, len(delta_text) // 4) if delta_text else 0
 
-            finish_reason: Optional[str] = None
+            finish_reason: str | None = None
             response_metadata = getattr(chunk, "response_metadata", {}) or {}
             finish_reason = response_metadata.get("finish_reason")
 
@@ -1098,17 +1094,17 @@ class AnthropicProvider(BaseAIProvider):
     async def generate(self, prompt: str, **kwargs: Any) -> AIResponse:
         raise NotImplementedError("AnthropicProvider is not yet implemented.")
 
-    async def chat(self, messages: List[ChatMessage], **kwargs: Any) -> AIResponse:
+    async def chat(self, messages: list[ChatMessage], **kwargs: Any) -> AIResponse:
         raise NotImplementedError("AnthropicProvider is not yet implemented.")
 
-    async def complete(self, prompt: str, suffix: Optional[str] = None, **kwargs: Any) -> AIResponse:
+    async def complete(self, prompt: str, suffix: str | None = None, **kwargs: Any) -> AIResponse:
         raise NotImplementedError("AnthropicProvider is not yet implemented.")
 
     async def stream_generate(self, prompt: str, **kwargs: Any) -> AsyncIterator[StreamChunk]:
         raise NotImplementedError("AnthropicProvider is not yet implemented.")
         yield  # Make this an async generator  # pragma: no cover
 
-    async def stream_chat(self, messages: List[ChatMessage], **kwargs: Any) -> AsyncIterator[StreamChunk]:
+    async def stream_chat(self, messages: list[ChatMessage], **kwargs: Any) -> AsyncIterator[StreamChunk]:
         raise NotImplementedError("AnthropicProvider is not yet implemented.")
         yield  # pragma: no cover
 
@@ -1131,7 +1127,7 @@ class AIProviderFactory:
         response = await provider.generate("Write a SQL query to count users.")
     """
 
-    _registry: Dict[ModelProvider, Type[BaseAIProvider]] = {
+    _registry: ClassVar[dict[ModelProvider, type[BaseAIProvider]]] = {
         ModelProvider.OPENAI: LangChainProvider,
         ModelProvider.AZURE_OPENAI: LangChainProvider,
         ModelProvider.OLLAMA: LangChainProvider,
@@ -1163,7 +1159,7 @@ class AIProviderFactory:
         return provider_cls(config)
 
     @classmethod
-    def register(cls, provider: ModelProvider, provider_cls: Type[BaseAIProvider]) -> None:
+    def register(cls, provider: ModelProvider, provider_cls: type[BaseAIProvider]) -> None:
         """Register a custom provider class.
 
         Args:

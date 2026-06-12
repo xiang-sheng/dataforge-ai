@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 DataForge AI - LangChain structured output parsers.
 
@@ -12,7 +11,7 @@ from __future__ import annotations
 import json
 import logging
 import re
-from typing import Any, Dict, List, Optional, Type, TypeVar
+from typing import Any, TypeVar
 
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
@@ -39,11 +38,11 @@ class FactTableDef(BaseModel):
 
     name: str = Field(description="Fully qualified fact table name.")
     grain: str = Field(description="The grain of the fact table (one row per ...).")
-    measures: List[str] = Field(
+    measures: list[str] = Field(
         default_factory=list,
         description="List of measure / metric column names.",
     )
-    foreign_keys: List[str] = Field(
+    foreign_keys: list[str] = Field(
         default_factory=list,
         description="Foreign-key references expressed as 'table.column' strings.",
     )
@@ -59,11 +58,11 @@ class DimensionTableDef(BaseModel):
     """
 
     name: str = Field(description="Fully qualified dimension table name.")
-    attributes: List[str] = Field(
+    attributes: list[str] = Field(
         default_factory=list,
         description="List of attribute column names.",
     )
-    hierarchies: List[str] = Field(
+    hierarchies: list[str] = Field(
         default_factory=list,
         description="Hierarchy descriptions (e.g. 'country > state > city').",
     )
@@ -130,7 +129,7 @@ class IndexRec(BaseModel):
 
     table_name: str = Field(description="The table the index applies to.")
     index_name: str = Field(description="Suggested index name.")
-    columns: List[str] = Field(
+    columns: list[str] = Field(
         default_factory=list,
         description="Ordered list of columns to include in the index.",
     )
@@ -149,7 +148,7 @@ class PartitionRec(BaseModel):
     """
 
     table_name: str = Field(description="The table to partition.")
-    partition_columns: List[str] = Field(
+    partition_columns: list[str] = Field(
         default_factory=list,
         description="Columns to partition on.",
     )
@@ -240,11 +239,11 @@ class SQLGenerationOutput(BaseModel):
         le=1.0,
         description="Self-assessed confidence score between 0.0 and 1.0.",
     )
-    assumptions: List[str] = Field(
+    assumptions: list[str] = Field(
         default_factory=list,
         description="Assumptions made when the question was ambiguous.",
     )
-    warnings: List[str] = Field(
+    warnings: list[str] = Field(
         default_factory=list,
         description="Potential issues or caveats with the generated query.",
     )
@@ -271,15 +270,15 @@ class DataModelingOutput(BaseModel):
         confidence: Self-assessed confidence score between 0.0 and 1.0.
     """
 
-    fact_tables: List[FactTableDef] = Field(
+    fact_tables: list[FactTableDef] = Field(
         default_factory=list,
         description="List of fact table definitions.",
     )
-    dimension_tables: List[DimensionTableDef] = Field(
+    dimension_tables: list[DimensionTableDef] = Field(
         default_factory=list,
         description="List of dimension table definitions.",
     )
-    ddl_statements: List[str] = Field(
+    ddl_statements: list[str] = Field(
         default_factory=list,
         description="DDL statements to create the modeled tables.",
     )
@@ -321,7 +320,7 @@ class SQLOptimizationOutput(BaseModel):
         default="moderate",
         description="Complexity of the original query: simple, moderate, or complex.",
     )
-    bottlenecks: List[Bottleneck] = Field(
+    bottlenecks: list[Bottleneck] = Field(
         default_factory=list,
         description="Performance bottlenecks identified in the original query.",
     )
@@ -329,15 +328,15 @@ class SQLOptimizationOutput(BaseModel):
         default="",
         description="The rewritten, optimized SQL query.",
     )
-    changes: List[Change] = Field(
+    changes: list[Change] = Field(
         default_factory=list,
         description="List of changes applied during optimization.",
     )
-    index_recommendations: List[IndexRec] = Field(
+    index_recommendations: list[IndexRec] = Field(
         default_factory=list,
         description="Recommended indexes to support the query.",
     )
-    partition_recommendations: List[PartitionRec] = Field(
+    partition_recommendations: list[PartitionRec] = Field(
         default_factory=list,
         description="Recommended partitioning strategies.",
     )
@@ -369,7 +368,7 @@ class SchemaReviewOutput(BaseModel):
         le=100,
         description="Overall quality score from 0 (poor) to 100 (excellent).",
     )
-    findings: List[Finding] = Field(
+    findings: list[Finding] = Field(
         default_factory=list,
         description="Individual findings / issues discovered during review.",
     )
@@ -400,19 +399,19 @@ class LineageAnalysisOutput(BaseModel):
             transformations applied along the lineage path.
     """
 
-    source_tables: List[str] = Field(
+    source_tables: list[str] = Field(
         default_factory=list,
         description="Tables identified as data sources.",
     )
-    target_tables: List[str] = Field(
+    target_tables: list[str] = Field(
         default_factory=list,
         description="Tables identified as data targets.",
     )
-    column_mappings: List[ColumnMapping] = Field(
+    column_mappings: list[ColumnMapping] = Field(
         default_factory=list,
         description="Column-level mappings between source and target tables.",
     )
-    transformation_descriptions: List[str] = Field(
+    transformation_descriptions: list[str] = Field(
         default_factory=list,
         description="Human-readable descriptions of transformations applied.",
     )
@@ -422,7 +421,7 @@ class LineageAnalysisOutput(BaseModel):
 # Format instructions for each output type
 # ---------------------------------------------------------------------------
 
-_FORMAT_INSTRUCTIONS: Dict[str, str] = {
+_FORMAT_INSTRUCTIONS: dict[str, str] = {
     "sql_generation": (
         "Return your response as a JSON object with the following structure:\n"
         "{\n"
@@ -573,8 +572,8 @@ class StructuredOutputParser:
 
     def __init__(
         self,
-        output_model: Type[T],
-        output_type: Optional[str] = None,
+        output_model: type[T],
+        output_type: str | None = None,
     ) -> None:
         self._output_model = output_model
         self._output_type = output_type
@@ -582,7 +581,7 @@ class StructuredOutputParser:
     # -- Public API ---------------------------------------------------------
 
     @property
-    def output_model(self) -> Type[T]:
+    def output_model(self) -> type[T]:
         """Return the Pydantic model class this parser targets."""
         return self._output_model
 
@@ -682,7 +681,7 @@ class StructuredOutputParser:
 
         return "\n".join(lines)
 
-    def _fallback_extract(self, text: str) -> Dict[str, Any]:
+    def _fallback_extract(self, text: str) -> dict[str, Any]:
         """Attempt to extract fields heuristically from unstructured text.
 
         This is a best-effort strategy used when JSON extraction fails.
@@ -696,7 +695,7 @@ class StructuredOutputParser:
             A dictionary with heuristically extracted field values.
         """
         model_name = self._output_model.__name__
-        data: Dict[str, Any] = {}
+        data: dict[str, Any] = {}
 
         if model_name == "SQLGenerationOutput":
             data = self._fallback_sql_generation(text)
@@ -712,9 +711,9 @@ class StructuredOutputParser:
         return data
 
     @staticmethod
-    def _fallback_sql_generation(text: str) -> Dict[str, Any]:
+    def _fallback_sql_generation(text: str) -> dict[str, Any]:
         """Heuristic extraction for SQLGenerationOutput fields."""
-        data: Dict[str, Any] = {}
+        data: dict[str, Any] = {}
 
         # Extract SQL from code blocks
         sql_match = re.search(r"```sql\s*\n(.*?)```", text, re.DOTALL)
@@ -751,7 +750,7 @@ class StructuredOutputParser:
         data["explanation"] = "\n".join(explanation_lines[:3]) if explanation_lines else ""
 
         # Extract assumptions
-        assumptions: List[str] = []
+        assumptions: list[str] = []
         in_section = False
         for line in text.splitlines():
             stripped = line.strip()
@@ -766,7 +765,7 @@ class StructuredOutputParser:
         data["assumptions"] = assumptions
 
         # Extract warnings
-        warnings: List[str] = []
+        warnings: list[str] = []
         in_section = False
         for line in text.splitlines():
             stripped = line.strip()
@@ -783,9 +782,9 @@ class StructuredOutputParser:
         return data
 
     @staticmethod
-    def _fallback_data_modeling(text: str) -> Dict[str, Any]:
+    def _fallback_data_modeling(text: str) -> dict[str, Any]:
         """Heuristic extraction for DataModelingOutput fields."""
-        data: Dict[str, Any] = {
+        data: dict[str, Any] = {
             "fact_tables": [],
             "dimension_tables": [],
             "ddl_statements": [],
@@ -819,9 +818,9 @@ class StructuredOutputParser:
         return data
 
     @staticmethod
-    def _fallback_sql_optimization(text: str) -> Dict[str, Any]:
+    def _fallback_sql_optimization(text: str) -> dict[str, Any]:
         """Heuristic extraction for SQLOptimizationOutput fields."""
-        data: Dict[str, Any] = {
+        data: dict[str, Any] = {
             "original_complexity": "moderate",
             "bottlenecks": [],
             "optimized_sql": "",
@@ -844,9 +843,9 @@ class StructuredOutputParser:
         return data
 
     @staticmethod
-    def _fallback_schema_review(text: str) -> Dict[str, Any]:
+    def _fallback_schema_review(text: str) -> dict[str, Any]:
         """Heuristic extraction for SchemaReviewOutput fields."""
-        data: Dict[str, Any] = {
+        data: dict[str, Any] = {
             "score": 50,
             "findings": [],
             "summary": "",
@@ -873,9 +872,9 @@ class StructuredOutputParser:
         return data
 
     @staticmethod
-    def _fallback_lineage(text: str) -> Dict[str, Any]:
+    def _fallback_lineage(text: str) -> dict[str, Any]:
         """Heuristic extraction for LineageAnalysisOutput fields."""
-        data: Dict[str, Any] = {
+        data: dict[str, Any] = {
             "source_tables": [],
             "target_tables": [],
             "column_mappings": [],
@@ -905,7 +904,7 @@ class StructuredOutputParser:
 # ---------------------------------------------------------------------------
 
 # Mapping from output_type string to (Pydantic model, output_type key)
-_OUTPUT_TYPE_REGISTRY: Dict[str, Type[BaseModel]] = {
+_OUTPUT_TYPE_REGISTRY: dict[str, type[BaseModel]] = {
     "sql_generation": SQLGenerationOutput,
     "data_modeling": DataModelingOutput,
     "sql_optimization": SQLOptimizationOutput,
@@ -965,7 +964,7 @@ def create_output_parser(
 
 def register_output_type(
     name: str,
-    model_cls: Type[BaseModel],
+    model_cls: type[BaseModel],
 ) -> None:
     """Register a custom output type for use with ``create_output_parser``.
 

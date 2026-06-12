@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Apache Hive adapter for DataForge AI.
 
@@ -17,20 +16,19 @@ Caveats:
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from sqlalchemy import text
 
-from src.core.exceptions import ConnectionError, QueryExecutionError
+from src.core.exceptions import QueryExecutionError
 from src.core.schemas import (
     ColumnDataType,
     ColumnInfo,
-    ConnectionConfig,
     ConnectionTestResult,
     IndexInfo,
-    IndexType,
     TableSchema,
     TableStats,
 )
@@ -38,7 +36,7 @@ from src.db.base import AbstractBaseAdapter
 
 logger = logging.getLogger(__name__)
 
-_HIVE_TYPE_MAP: Dict[str, ColumnDataType] = {
+_HIVE_TYPE_MAP: dict[str, ColumnDataType] = {
     "tinyint": ColumnDataType.INTEGER,
     "smallint": ColumnDataType.INTEGER,
     "int": ColumnDataType.INTEGER,
@@ -128,12 +126,12 @@ class HiveAdapter(AbstractBaseAdapter):
     # Metadata — databases & schemas
     # ------------------------------------------------------------------ #
 
-    async def get_databases(self) -> List[str]:
+    async def get_databases(self) -> list[str]:
         rows = await self.execute_query("SHOW DATABASES")
         # SHOW DATABASES returns a single column; the key varies by driver
-        return [list(row.values())[0] for row in rows if row]
+        return [next(iter(row.values())) for row in rows if row]
 
-    async def get_schemas(self, database: Optional[str] = None) -> List[str]:
+    async def get_schemas(self, database: str | None = None) -> list[str]:
         # Hive uses databases as the top-level namespace (no schemas)
         return [""]
 
@@ -143,14 +141,14 @@ class HiveAdapter(AbstractBaseAdapter):
 
     async def get_tables(
         self,
-        database: Optional[str] = None,
-        schema: Optional[str] = None,
-        table_type: Optional[str] = None,
-    ) -> List[str]:
+        database: str | None = None,
+        schema: str | None = None,
+        table_type: str | None = None,
+    ) -> list[str]:
         db = self._default_database(database) or "default"
         sql = f"SHOW TABLES IN `{db}`"
         rows = await self.execute_query(sql)
-        tables = [list(row.values())[0] for row in rows if row]
+        tables = [next(iter(row.values())) for row in rows if row]
 
         # Filter by type if requested (requires DESCRIBE FORMATTED per table)
         # For efficiency, we skip filtering and return all tables
@@ -159,8 +157,8 @@ class HiveAdapter(AbstractBaseAdapter):
     async def get_table_schema(
         self,
         table_name: str,
-        database: Optional[str] = None,
-        schema: Optional[str] = None,
+        database: str | None = None,
+        schema: str | None = None,
     ) -> TableSchema:
         db = self._default_database(database) or "default"
         columns = await self.get_columns(table_name, database=db)
@@ -205,14 +203,14 @@ class HiveAdapter(AbstractBaseAdapter):
     async def get_columns(
         self,
         table_name: str,
-        database: Optional[str] = None,
-        schema: Optional[str] = None,
-    ) -> List[ColumnInfo]:
+        database: str | None = None,
+        schema: str | None = None,
+    ) -> list[ColumnInfo]:
         db = self._default_database(database) or "default"
         sql = f"DESCRIBE `{db}`.`{table_name}`"
         rows = await self.execute_query(sql)
 
-        columns: List[ColumnInfo] = []
+        columns: list[ColumnInfo] = []
         position = 0
         in_partition_section = False
 
@@ -257,9 +255,9 @@ class HiveAdapter(AbstractBaseAdapter):
     async def get_indexes(
         self,
         table_name: str,
-        database: Optional[str] = None,
-        schema: Optional[str] = None,
-    ) -> List[IndexInfo]:
+        database: str | None = None,
+        schema: str | None = None,
+    ) -> list[IndexInfo]:
         # Hive 2 had limited index support; Hive 3 removed it entirely.
         # Return empty list as Hive does not use traditional indexes.
         return []
@@ -271,16 +269,16 @@ class HiveAdapter(AbstractBaseAdapter):
     async def execute_query(
         self,
         sql: str,
-        parameters: Optional[Dict[str, Any]] = None,
-        max_rows: Optional[int] = None,
-    ) -> List[Dict[str, Any]]:
+        parameters: dict[str, Any] | None = None,
+        max_rows: int | None = None,
+    ) -> list[dict[str, Any]]:
         try:
             async with self.engine.connect() as conn:
                 result = await conn.execute(text(sql), parameters or {})
                 if result.returns_rows:
                     columns = list(result.keys())
                     rows = result.fetchmany(max_rows) if max_rows else result.fetchall()
-                    return [dict(zip(columns, row)) for row in rows]
+                    return [dict(zip(columns, row, strict=False)) for row in rows]
                 return []
         except Exception as exc:
             raise QueryExecutionError(
@@ -305,8 +303,8 @@ class HiveAdapter(AbstractBaseAdapter):
     async def get_create_table_sql(
         self,
         table_name: str,
-        database: Optional[str] = None,
-        schema: Optional[str] = None,
+        database: str | None = None,
+        schema: str | None = None,
     ) -> str:
         db = self._default_database(database) or "default"
         try:
@@ -318,7 +316,7 @@ class HiveAdapter(AbstractBaseAdapter):
 
         if rows:
             # SHOW CREATE TABLE returns a single column with the DDL
-            ddl_parts = [list(row.values())[0] for row in rows if row]
+            ddl_parts = [next(iter(row.values())) for row in rows if row]
             return "\n".join(ddl_parts)
         raise QueryExecutionError(
             message=f"Could not retrieve CREATE TABLE for '{db}.{table_name}'.",
@@ -328,8 +326,8 @@ class HiveAdapter(AbstractBaseAdapter):
     async def get_table_ddl(
         self,
         table_name: str,
-        database: Optional[str] = None,
-        schema: Optional[str] = None,
+        database: str | None = None,
+        schema: str | None = None,
     ) -> str:
         return await self.get_create_table_sql(table_name, database=database)
 
@@ -340,8 +338,8 @@ class HiveAdapter(AbstractBaseAdapter):
     async def get_table_stats(
         self,
         table_name: str,
-        database: Optional[str] = None,
-        schema: Optional[str] = None,
+        database: str | None = None,
+        schema: str | None = None,
     ) -> TableStats:
         db = self._default_database(database) or "default"
         row_count = 0
@@ -358,15 +356,11 @@ class HiveAdapter(AbstractBaseAdapter):
                     key = str(vals[0]).strip().lower() if vals[0] else ""
                     value = str(vals[1]).strip() if vals[1] else ""
                     if key == "numrows" or key == "numfiles":
-                        try:
+                        with contextlib.suppress(ValueError):
                             row_count = int(value)
-                        except ValueError:
-                            pass
                     if key == "totalsize":
-                        try:
+                        with contextlib.suppress(ValueError):
                             size_bytes = int(value)
-                        except ValueError:
-                            pass
         except Exception:
             pass
 
@@ -380,7 +374,7 @@ class HiveAdapter(AbstractBaseAdapter):
         try:
             rows = await self.execute_query("SET hive.version")
             if rows:
-                return str(list(rows[0].values())[0])
+                return str(next(iter(rows[0].values())))
             return "unknown"
         except Exception:
             return "unknown"

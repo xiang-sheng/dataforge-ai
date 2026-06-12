@@ -7,19 +7,19 @@ sample configurations, and schema data used across all test modules.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from typing import Any, AsyncGenerator
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 import pytest_asyncio
-from httpx import ASGITransport, AsyncClient
-
-from src.api.router import api_router
-from src.api.deps import get_settings, get_connection_manager, get_ai_provider, get_db_adapter
-
 from fastapi import FastAPI
+from httpx import ASGITransport, AsyncClient
+from src.api.deps import get_ai_provider, get_connection_manager, get_settings
+from src.api.router import api_router
 
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
 
 # ---------------------------------------------------------------------------
 # Application factory
@@ -66,7 +66,7 @@ def _make_sample_connection(
     db_type: str = "postgresql",
 ) -> dict[str, Any]:
     """Build a sample connection dict."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     return {
         "id": conn_id,
         "name": name,

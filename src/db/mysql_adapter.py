@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 MySQL adapter for DataForge AI.
 
@@ -11,15 +10,14 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from sqlalchemy import text
 
-from src.core.exceptions import ConnectionError, QueryExecutionError, QueryTimeoutError
+from src.core.exceptions import ConnectionError, QueryExecutionError
 from src.core.schemas import (
     ColumnDataType,
     ColumnInfo,
-    ConnectionConfig,
     ConnectionTestResult,
     IndexInfo,
     IndexType,
@@ -31,7 +29,7 @@ from src.db.base import AbstractBaseAdapter
 logger = logging.getLogger(__name__)
 
 # Mapping from MySQL native types to logical ColumnDataType
-_MYSQL_TYPE_MAP: Dict[str, ColumnDataType] = {
+_MYSQL_TYPE_MAP: dict[str, ColumnDataType] = {
     "tinyint": ColumnDataType.INTEGER,
     "smallint": ColumnDataType.INTEGER,
     "mediumint": ColumnDataType.INTEGER,
@@ -131,11 +129,11 @@ class MySQLAdapter(AbstractBaseAdapter):
     # Metadata — databases & schemas
     # ------------------------------------------------------------------ #
 
-    async def get_databases(self) -> List[str]:
+    async def get_databases(self) -> list[str]:
         rows = await self.execute_query("SHOW DATABASES")
         return [row.get("Database", "") for row in rows if row.get("Database")]
 
-    async def get_schemas(self, database: Optional[str] = None) -> List[str]:
+    async def get_schemas(self, database: str | None = None) -> list[str]:
         # MySQL does not have a separate schema namespace
         return [""]
 
@@ -145,17 +143,17 @@ class MySQLAdapter(AbstractBaseAdapter):
 
     async def get_tables(
         self,
-        database: Optional[str] = None,
-        schema: Optional[str] = None,
-        table_type: Optional[str] = None,
-    ) -> List[str]:
+        database: str | None = None,
+        schema: str | None = None,
+        table_type: str | None = None,
+    ) -> list[str]:
         db = self._default_database(database)
         sql = """
             SELECT TABLE_NAME
             FROM INFORMATION_SCHEMA.TABLES
             WHERE TABLE_SCHEMA = :db
         """
-        params: Dict[str, Any] = {"db": db}
+        params: dict[str, Any] = {"db": db}
         if table_type:
             sql += " AND TABLE_TYPE = :ttype"
             params["ttype"] = table_type
@@ -166,8 +164,8 @@ class MySQLAdapter(AbstractBaseAdapter):
     async def get_table_schema(
         self,
         table_name: str,
-        database: Optional[str] = None,
-        schema: Optional[str] = None,
+        database: str | None = None,
+        schema: str | None = None,
     ) -> TableSchema:
         db = self._default_database(database)
         columns = await self.get_columns(table_name, database=db)
@@ -206,9 +204,9 @@ class MySQLAdapter(AbstractBaseAdapter):
     async def get_columns(
         self,
         table_name: str,
-        database: Optional[str] = None,
-        schema: Optional[str] = None,
-    ) -> List[ColumnInfo]:
+        database: str | None = None,
+        schema: str | None = None,
+    ) -> list[ColumnInfo]:
         db = self._default_database(database)
         sql = """
             SELECT
@@ -229,7 +227,7 @@ class MySQLAdapter(AbstractBaseAdapter):
             ORDER BY ORDINAL_POSITION
         """
         rows = await self.execute_query(sql, {"db": db, "tbl": table_name})
-        columns: List[ColumnInfo] = []
+        columns: list[ColumnInfo] = []
         for row in rows:
             columns.append(
                 ColumnInfo(
@@ -252,9 +250,9 @@ class MySQLAdapter(AbstractBaseAdapter):
     async def get_indexes(
         self,
         table_name: str,
-        database: Optional[str] = None,
-        schema: Optional[str] = None,
-    ) -> List[IndexInfo]:
+        database: str | None = None,
+        schema: str | None = None,
+    ) -> list[IndexInfo]:
         db = self._default_database(database)
         sql = """
             SELECT
@@ -270,7 +268,7 @@ class MySQLAdapter(AbstractBaseAdapter):
         rows = await self.execute_query(sql, {"db": db, "tbl": table_name})
 
         # Group by index name
-        index_map: Dict[str, Dict[str, Any]] = {}
+        index_map: dict[str, dict[str, Any]] = {}
         for row in rows:
             name = row["INDEX_NAME"]
             if name not in index_map:
@@ -302,16 +300,16 @@ class MySQLAdapter(AbstractBaseAdapter):
     async def execute_query(
         self,
         sql: str,
-        parameters: Optional[Dict[str, Any]] = None,
-        max_rows: Optional[int] = None,
-    ) -> List[Dict[str, Any]]:
+        parameters: dict[str, Any] | None = None,
+        max_rows: int | None = None,
+    ) -> list[dict[str, Any]]:
         try:
             async with self.engine.connect() as conn:
                 result = await conn.execute(text(sql), parameters or {})
                 if result.returns_rows:
                     columns = list(result.keys())
                     rows = result.fetchmany(max_rows) if max_rows else result.fetchall()
-                    return [dict(zip(columns, row)) for row in rows]
+                    return [dict(zip(columns, row, strict=False)) for row in rows]
                 return []
         except Exception as exc:
             raise QueryExecutionError(
@@ -336,8 +334,8 @@ class MySQLAdapter(AbstractBaseAdapter):
     async def get_create_table_sql(
         self,
         table_name: str,
-        database: Optional[str] = None,
-        schema: Optional[str] = None,
+        database: str | None = None,
+        schema: str | None = None,
     ) -> str:
         db = self._default_database(database)
         qualified = f"`{db}`.`{table_name}`" if db else f"`{table_name}`"
@@ -353,8 +351,8 @@ class MySQLAdapter(AbstractBaseAdapter):
     async def get_table_ddl(
         self,
         table_name: str,
-        database: Optional[str] = None,
-        schema: Optional[str] = None,
+        database: str | None = None,
+        schema: str | None = None,
     ) -> str:
         return await self.get_create_table_sql(table_name, database=database)
 
@@ -365,8 +363,8 @@ class MySQLAdapter(AbstractBaseAdapter):
     async def get_table_stats(
         self,
         table_name: str,
-        database: Optional[str] = None,
-        schema: Optional[str] = None,
+        database: str | None = None,
+        schema: str | None = None,
     ) -> TableStats:
         db = self._default_database(database)
         sql = """

@@ -7,8 +7,8 @@ AI-assisted warehouse design, lineage inspection, and migration scripting.
 
 from __future__ import annotations
 
-from enum import Enum
-from typing import Any, Optional
+from enum import StrEnum
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
@@ -20,7 +20,7 @@ from src.api.deps import get_ai_provider, get_connection_manager
 # ---------------------------------------------------------------------------
 
 
-class WarehouseLayer(str, Enum):
+class WarehouseLayer(StrEnum):
     """Standard data-warehouse layers."""
 
     ODS = "ods"
@@ -42,7 +42,7 @@ class ColumnDefinition(BaseModel):
     name: str = Field(..., description="Column name.")
     data_type: str = Field(..., description="SQL data type (e.g. VARCHAR(255), BIGINT).")
     nullable: bool = Field(True, description="Whether the column allows NULL values.")
-    comment: Optional[str] = Field(None, description="Column-level documentation.")
+    comment: str | None = Field(None, description="Column-level documentation.")
     is_partition_key: bool = Field(False, description="Whether this column is part of the partition key.")
     is_primary_key: bool = Field(False, description="Whether this column is (part of) the primary key.")
 
@@ -54,9 +54,9 @@ class TableCreateRequest(BaseModel):
     connection_id: str = Field(..., description="Target connection ID.")
     database: str = Field(..., description="Target database/schema name.")
     columns: list[ColumnDefinition] = Field(..., min_length=1, description="Column definitions.")
-    partition_by: Optional[list[str]] = Field(None, description="Partition-by column names.")
-    engine: Optional[str] = Field(None, description="Storage engine (e.g. MergeTree, InnoDB).")
-    table_comment: Optional[str] = Field(None, description="Table-level documentation.")
+    partition_by: list[str] | None = Field(None, description="Partition-by column names.")
+    engine: str | None = Field(None, description="Storage engine (e.g. MergeTree, InnoDB).")
+    table_comment: str | None = Field(None, description="Table-level documentation.")
     properties: dict[str, Any] = Field(default_factory=dict, description="Engine-specific table properties.")
 
 
@@ -67,8 +67,8 @@ class TableResponse(BaseModel):
     table_name: str
     database: str
     column_count: int
-    engine: Optional[str] = None
-    table_comment: Optional[str] = None
+    engine: str | None = None
+    table_comment: str | None = None
     created_sql: str = Field(..., description="The DDL statement that was executed.")
 
 
@@ -79,8 +79,8 @@ class WarehouseDesignRequest(BaseModel):
     source_database: str = Field(..., description="Source database/schema name.")
     source_tables: list[str] = Field(default_factory=list, description="Tables to include (empty = all).")
     target_layer: WarehouseLayer = Field(WarehouseLayer.DWD, description="Target warehouse layer.")
-    business_domain: Optional[str] = Field(None, description="Business domain context (e.g. 'e-commerce', 'finance').")
-    requirements: Optional[str] = Field(None, description="Natural-language requirements describing the data model.")
+    business_domain: str | None = Field(None, description="Business domain context (e.g. 'e-commerce', 'finance').")
+    requirements: str | None = Field(None, description="Natural-language requirements describing the data model.")
 
 
 class WarehouseDesignResponse(BaseModel):
@@ -97,7 +97,7 @@ class LineageEdge(BaseModel):
 
     source_table: str
     target_table: str
-    transformation: Optional[str] = None
+    transformation: str | None = None
 
 
 class LineageResponse(BaseModel):
@@ -114,7 +114,7 @@ class MigrationRequest(BaseModel):
     source_ddl: str = Field(..., description="Current DDL or schema definition.")
     target_ddl: str = Field(..., description="Desired DDL or schema definition.")
     dialect: str = Field("clickhouse", description="SQL dialect for the migration script.")
-    connection_id: Optional[str] = Field(None, description="Connection to execute the migration on (optional).")
+    connection_id: str | None = Field(None, description="Connection to execute the migration on (optional).")
 
 
 class MigrationResponse(BaseModel):
@@ -123,7 +123,7 @@ class MigrationResponse(BaseModel):
     migration_sql: str = Field(..., description="Executable migration DDL.")
     rollback_sql: str = Field(..., description="Rollback DDL to undo the migration.")
     warnings: list[str] = Field(default_factory=list, description="Potential issues detected.")
-    estimated_impact: Optional[str] = Field(None, description="Human-readable impact assessment.")
+    estimated_impact: str | None = Field(None, description="Human-readable impact assessment.")
 
 
 # ---------------------------------------------------------------------------

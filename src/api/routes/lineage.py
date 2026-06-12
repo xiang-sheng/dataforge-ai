@@ -7,7 +7,7 @@ SQL-based lineage analysis, and impact analysis.
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
@@ -25,7 +25,7 @@ class LineageNode(BaseModel):
     id: str = Field(..., description="Unique node identifier (usually schema.table).")
     table_name: str = Field(..., description="Fully qualified table name.")
     node_type: str = Field("table", description="Node type: 'table', 'view', 'cte', 'subquery'.")
-    layer: Optional[str] = Field(None, description="Warehouse layer (ods, dwd, dws, ads).")
+    layer: str | None = Field(None, description="Warehouse layer (ods, dwd, dws, ads).")
     metadata: dict[str, Any] = Field(default_factory=dict, description="Additional metadata.")
 
 
@@ -35,8 +35,8 @@ class LineageEdge(BaseModel):
     source_id: str = Field(..., description="Source node ID.")
     target_id: str = Field(..., description="Target node ID.")
     edge_type: str = Field("data_flow", description="Edge type: 'data_flow', 'derivation', 'reference'.")
-    transformation: Optional[str] = Field(None, description="Description of the transformation applied.")
-    sql_snippet: Optional[str] = Field(None, description="SQL fragment that creates this relationship.")
+    transformation: str | None = Field(None, description="Description of the transformation applied.")
+    sql_snippet: str | None = Field(None, description="SQL fragment that creates this relationship.")
 
 
 class LineageGraph(BaseModel):
@@ -53,7 +53,7 @@ class ColumnLineageNode(BaseModel):
 
     table_name: str
     column_name: str
-    data_type: Optional[str] = None
+    data_type: str | None = None
 
 
 class ColumnLineageEdge(BaseModel):
@@ -63,7 +63,7 @@ class ColumnLineageEdge(BaseModel):
     source_column: str
     target_table: str
     target_column: str
-    transformation: Optional[str] = None
+    transformation: str | None = None
 
 
 class ColumnLineageResponse(BaseModel):
@@ -80,7 +80,7 @@ class LineageAnalyzeRequest(BaseModel):
 
     sql: str = Field(..., min_length=1, description="SQL statement(s) to analyse for lineage.")
     dialect: str = Field("clickhouse", description="SQL dialect of the provided statements.")
-    default_schema: Optional[str] = Field(None, description="Default schema name for unqualified table references.")
+    default_schema: str | None = Field(None, description="Default schema name for unqualified table references.")
 
 
 class LineageAnalyzeResponse(BaseModel):

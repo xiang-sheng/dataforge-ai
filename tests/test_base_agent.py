@@ -1,7 +1,5 @@
 """Tests for src.warehouse.base_agent — shared ReAct loop logic."""
 
-import pytest
-from unittest.mock import MagicMock, patch
 
 from src.warehouse.base_agent import BaseAgent, ToolCallLog
 

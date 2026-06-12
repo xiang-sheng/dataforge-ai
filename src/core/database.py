@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Database connection management for DataForge AI.
 
@@ -16,25 +15,26 @@ import asyncio
 import logging
 import time
 from contextlib import asynccontextmanager
-from typing import Any, AsyncIterator, Dict, Optional
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import text
-from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import (
-    AsyncConnection,
     AsyncEngine,
     AsyncSession,
     async_sessionmaker,
     create_async_engine,
 )
 
-from src.config.settings import AppSettings
 from src.core.exceptions import (
     ConnectionError,
-    ConnectionPoolExhaustedError,
     ConnectionTimeoutError,
 )
-from src.core.schemas import ConnectionConfig
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
+    from src.config.settings import AppSettings
+    from src.core.schemas import ConnectionConfig
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +42,7 @@ logger = logging.getLogger(__name__)
 class _EngineEntry:
     """Internal bookkeeping for a cached engine."""
 
-    __slots__ = ("engine", "session_factory", "config", "created_at", "last_health_check")
+    __slots__ = ("config", "created_at", "engine", "last_health_check", "session_factory")
 
     def __init__(
         self,
@@ -54,7 +54,7 @@ class _EngineEntry:
         self.session_factory = session_factory
         self.config = config
         self.created_at = time.time()
-        self.last_health_check: Optional[float] = None
+        self.last_health_check: float | None = None
 
 
 class ConnectionManager:
@@ -78,12 +78,12 @@ class ConnectionManager:
 
     def __init__(self, settings: AppSettings) -> None:
         self._settings = settings
-        self._engines: Dict[str, _EngineEntry] = {}
+        self._engines: dict[str, _EngineEntry] = {}
         self._lock = asyncio.Lock()
 
         # Internal metadata engine (created during initialise())
-        self._internal_engine: Optional[AsyncEngine] = None
-        self._internal_session_factory: Optional[async_sessionmaker[AsyncSession]] = None
+        self._internal_engine: AsyncEngine | None = None
+        self._internal_session_factory: async_sessionmaker[AsyncSession] | None = None
 
     # ------------------------------------------------------------------ #
     # Lifecycle
@@ -304,7 +304,7 @@ class ConnectionManager:
     # Health checks
     # ------------------------------------------------------------------ #
 
-    async def health_check(self, config: ConnectionConfig) -> Dict[str, Any]:
+    async def health_check(self, config: ConnectionConfig) -> dict[str, Any]:
         """
         Run a lightweight health probe against an external connection.
 
@@ -330,11 +330,11 @@ class ConnectionManager:
                 "status": "healthy",
                 "latency_ms": round(latency, 2),
             }
-        except asyncio.TimeoutError:
+        except TimeoutError:
             raise ConnectionTimeoutError(
                 message=f"Health check timed out for '{cid}'.",
                 details={"connection_id": cid, "timeout_s": config.connection_timeout},
-            )
+            ) from None
         except Exception as exc:
             return {
                 "connection_id": cid,
@@ -343,9 +343,9 @@ class ConnectionManager:
                 "latency_ms": round((time.perf_counter() - start) * 1000, 2),
             }
 
-    async def check_all(self) -> Dict[str, Dict[str, Any]]:
+    async def check_all(self) -> dict[str, dict[str, Any]]:
         """Health-check every cached connection and return a summary."""
-        results: Dict[str, Dict[str, Any]] = {}
+        results: dict[str, dict[str, Any]] = {}
         for cid, entry in self._engines.items():
             results[cid] = await self.health_check(entry.config)
         return results
@@ -366,9 +366,9 @@ class ConnectionManager:
     # Diagnostics
     # ------------------------------------------------------------------ #
 
-    def list_connections(self) -> Dict[str, Dict[str, Any]]:
+    def list_connections(self) -> dict[str, dict[str, Any]]:
         """Return a summary of all cached connections (no secrets)."""
-        summary: Dict[str, Dict[str, Any]] = {}
+        summary: dict[str, dict[str, Any]] = {}
         for cid, entry in self._engines.items():
             summary[cid] = {
                 "db_type": entry.config.db_type,

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any, Optional
+from typing import Any, ClassVar
 
 from src.agents.base import AgentResult, ManagedAgent
 
@@ -21,14 +21,14 @@ class DDLAgentWrapper(ManagedAgent):
 
     name = "ddl_build"
     description = "智能建表：从源表结构自动生成数仓 DDL（支持 ODS/DWD/DWS/ADS 层）。适用于 ETL 建表、数仓分层设计。"
-    intent_keywords = [
+    intent_keywords: ClassVar[list[str]] = [
         "建表", "DDL", "数仓", "创建表", "ETL",
         "ODS", "DWD", "DWS", "ADS", "生成表",
         "分层", "维度", "事实表", "宽表", "汇总表",
         "目标表", "源表", "字段设计",
     ]
 
-    def __init__(self, llm: Any, db: Any, convention_file: Optional[str] = None):
+    def __init__(self, llm: Any, db: Any, convention_file: str | None = None):
         """Initialize with LLM and database connection.
 
         Args:

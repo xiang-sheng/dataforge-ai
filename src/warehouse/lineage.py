@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 DataForge AI - Data lineage tracking.
 
@@ -12,7 +11,7 @@ import logging
 import re
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -66,9 +65,9 @@ class LineageGraph:
         tables: Set of all tables referenced in the graph.
     """
 
-    table_edges: Set[TableLineage] = field(default_factory=set)
-    column_edges: List[ColumnLineage] = field(default_factory=list)
-    tables: Set[str] = field(default_factory=set)
+    table_edges: set[TableLineage] = field(default_factory=set)
+    column_edges: list[ColumnLineage] = field(default_factory=list)
+    tables: set[str] = field(default_factory=set)
 
     def add_table_edge(self, source: str, target: str, relationship: str = "INSERT INTO") -> None:
         """Add a table-level lineage edge.
@@ -105,7 +104,7 @@ class LineageGraph:
         self.tables.add(source_table)
         self.tables.add(target_table)
 
-    def get_upstream_tables(self, table: str) -> Set[str]:
+    def get_upstream_tables(self, table: str) -> set[str]:
         """Return all direct upstream tables for the given table.
 
         Args:
@@ -116,7 +115,7 @@ class LineageGraph:
         """
         return {edge.source_table for edge in self.table_edges if edge.target_table == table}
 
-    def get_downstream_tables(self, table: str) -> Set[str]:
+    def get_downstream_tables(self, table: str) -> set[str]:
         """Return all direct downstream tables for the given table.
 
         Args:
@@ -140,9 +139,9 @@ class LineageNode:
     """
 
     table: str
-    column: Optional[str] = None
+    column: str | None = None
     depth: int = 0
-    path: List[str] = field(default_factory=list)
+    path: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -154,7 +153,7 @@ class CycleInfo:
         description: Human-readable description of the cycle.
     """
 
-    tables: List[str]
+    tables: list[str]
     description: str = ""
 
 
@@ -232,7 +231,7 @@ class _SQLLineageParser:
         return graph
 
     @classmethod
-    def _detect_target(cls, sql: str) -> Optional[str]:
+    def _detect_target(cls, sql: str) -> str | None:
         """Detect the target (output) table of a SQL statement."""
         for pattern in (cls._INSERT_INTO_RE, cls._CTAS_RE, cls._MERGE_RE):
             match = pattern.search(sql)
@@ -241,9 +240,9 @@ class _SQLLineageParser:
         return None
 
     @classmethod
-    def _detect_sources(cls, sql: str) -> Set[str]:
+    def _detect_sources(cls, sql: str) -> set[str]:
         """Detect all source tables referenced in FROM and JOIN clauses."""
-        sources: Set[str] = set()
+        sources: set[str] = set()
 
         for match in cls._FROM_RE.finditer(sql):
             table = match.group(1).strip("`\";(")
@@ -262,7 +261,7 @@ class _SQLLineageParser:
         cls,
         sql: str,
         target_table: str,
-        source_tables: Set[str],
+        source_tables: set[str],
         graph: LineageGraph,
     ) -> None:
         """Best-effort column-level lineage extraction.
@@ -339,9 +338,9 @@ class _SQLLineageParser:
                     )
 
     @classmethod
-    def _build_alias_map(cls, sql: str, source_tables: Set[str]) -> Dict[str, str]:
+    def _build_alias_map(cls, sql: str, source_tables: set[str]) -> dict[str, str]:
         """Build a mapping from table aliases to actual table names."""
-        alias_map: Dict[str, str] = {}
+        alias_map: dict[str, str] = {}
 
         # Match "FROM table alias" and "FROM table AS alias"
         patterns = [
@@ -363,7 +362,7 @@ class _SQLLineageParser:
         return alias_map
 
     @staticmethod
-    def _split_select_expressions(select_clause: str) -> List[str]:
+    def _split_select_expressions(select_clause: str) -> list[str]:
         """Split a SELECT clause into individual expressions.
 
         Handles nested parentheses to avoid splitting on commas inside
@@ -375,7 +374,7 @@ class _SQLLineageParser:
         Returns:
             A list of individual expression strings.
         """
-        expressions: List[str] = []
+        expressions: list[str] = []
         current = ""
         depth = 0
 
@@ -463,7 +462,7 @@ class LineageTracker:
 
         return statement_graph
 
-    def parse_multiple_sql(self, sql_statements: List[str]) -> LineageGraph:
+    def parse_multiple_sql(self, sql_statements: list[str]) -> LineageGraph:
         """Parse multiple SQL statements and build a cumulative lineage graph.
 
         Args:
@@ -479,10 +478,10 @@ class LineageTracker:
     def trace_upstream(
         self,
         table: str,
-        column: Optional[str] = None,
-        graph: Optional[LineageGraph] = None,
+        column: str | None = None,
+        graph: LineageGraph | None = None,
         max_depth: int = 20,
-    ) -> List[LineageNode]:
+    ) -> list[LineageNode]:
         """Trace all upstream dependencies for a table or column.
 
         Performs a breadth-first traversal of the lineage graph to find all
@@ -503,10 +502,10 @@ class LineageTracker:
     def trace_downstream(
         self,
         table: str,
-        column: Optional[str] = None,
-        graph: Optional[LineageGraph] = None,
+        column: str | None = None,
+        graph: LineageGraph | None = None,
         max_depth: int = 20,
-    ) -> List[LineageNode]:
+    ) -> list[LineageNode]:
         """Trace all downstream dependencies for a table or column.
 
         Args:
@@ -523,7 +522,7 @@ class LineageTracker:
 
     def visualize_lineage(
         self,
-        graph: Optional[LineageGraph] = None,
+        graph: LineageGraph | None = None,
         format: str = "text",
     ) -> str:
         """Generate a formatted visualization of the lineage graph.
@@ -549,8 +548,8 @@ class LineageTracker:
 
     def detect_circular_dependencies(
         self,
-        graph: Optional[LineageGraph] = None,
-    ) -> List[CycleInfo]:
+        graph: LineageGraph | None = None,
+    ) -> list[CycleInfo]:
         """Detect circular dependencies in the lineage graph.
 
         Uses depth-first search to find cycles in the table-level lineage.
@@ -565,15 +564,15 @@ class LineageTracker:
         g = graph or self._global_graph
 
         # Build adjacency list
-        adj: Dict[str, Set[str]] = defaultdict(set)
+        adj: dict[str, set[str]] = defaultdict(set)
         for edge in g.table_edges:
             adj[edge.source_table].add(edge.target_table)
 
-        cycles: List[List[str]] = []
-        visited: Set[str] = set()
-        rec_stack: Set[str] = set()
+        cycles: list[list[str]] = []
+        visited: set[str] = set()
+        rec_stack: set[str] = set()
 
-        def _dfs(node: str, path: List[str]) -> None:
+        def _dfs(node: str, path: list[str]) -> None:
             visited.add(node)
             rec_stack.add(node)
             path.append(node)
@@ -584,7 +583,7 @@ class LineageTracker:
                 elif neighbor in rec_stack:
                     # Found a cycle: extract it
                     cycle_start = path.index(neighbor)
-                    cycle = path[cycle_start:] + [neighbor]
+                    cycle = [*path[cycle_start:], neighbor]
                     cycles.append(cycle)
 
             path.pop()
@@ -595,7 +594,7 @@ class LineageTracker:
                 _dfs(table, [])
 
         # Convert to CycleInfo
-        results: List[CycleInfo] = []
+        results: list[CycleInfo] = []
         for cycle in cycles:
             results.append(
                 CycleInfo(
@@ -609,8 +608,8 @@ class LineageTracker:
     def get_impact_analysis(
         self,
         table: str,
-        graph: Optional[LineageGraph] = None,
-    ) -> Dict[str, Any]:
+        graph: LineageGraph | None = None,
+    ) -> dict[str, Any]:
         """Perform an impact analysis for changes to a given table.
 
         Identifies all downstream tables and columns that would be affected
@@ -630,7 +629,7 @@ class LineageTracker:
         affected_tables = list({n.table for n in downstream if n.table != table})
 
         # Column-level impact
-        affected_columns: List[Dict[str, str]] = []
+        affected_columns: list[dict[str, str]] = []
         for col_edge in g.column_edges:
             if col_edge.source_table == table:
                 affected_columns.append({
@@ -655,11 +654,11 @@ class LineageTracker:
     @staticmethod
     def _bfs_trace(
         table: str,
-        column: Optional[str],
+        column: str | None,
         graph: LineageGraph,
         direction: str = "upstream",
         max_depth: int = 20,
-    ) -> List[LineageNode]:
+    ) -> list[LineageNode]:
         """Breadth-first traversal for lineage tracing.
 
         Args:
@@ -672,9 +671,9 @@ class LineageTracker:
         Returns:
             A list of ``LineageNode`` objects in BFS order.
         """
-        results: List[LineageNode] = []
-        visited: Set[str] = set()
-        queue: deque[Tuple[str, Optional[str], int, List[str]]] = deque()
+        results: list[LineageNode] = []
+        visited: set[str] = set()
+        queue: deque[tuple[str, str | None, int, list[str]]] = deque()
 
         queue.append((table, column, 0, [table]))
         visited.add(table)
@@ -711,7 +710,7 @@ class LineageTracker:
                                     neighbor_key,
                                     col_edge.source_column,
                                     depth + 1,
-                                    path + [neighbor_key],
+                                    [*path, neighbor_key],
                                 ))
                 else:
                     for neighbor in neighbors:
@@ -721,7 +720,7 @@ class LineageTracker:
                                 neighbor,
                                 None,
                                 depth + 1,
-                                path + [neighbor],
+                                [*path, neighbor],
                             ))
             else:  # downstream
                 neighbors = graph.get_downstream_tables(current_table)
@@ -738,7 +737,7 @@ class LineageTracker:
                                     neighbor_key,
                                     col_edge.target_column,
                                     depth + 1,
-                                    path + [neighbor_key],
+                                    [*path, neighbor_key],
                                 ))
                 else:
                     for neighbor in neighbors:
@@ -748,7 +747,7 @@ class LineageTracker:
                                 neighbor,
                                 None,
                                 depth + 1,
-                                path + [neighbor],
+                                [*path, neighbor],
                             ))
 
         return results
@@ -756,10 +755,10 @@ class LineageTracker:
     @staticmethod
     def _render_text(graph: LineageGraph) -> str:
         """Render the lineage graph as a plain-text tree."""
-        lines: List[str] = ["=== Data Lineage Graph ===", ""]
+        lines: list[str] = ["=== Data Lineage Graph ===", ""]
 
         # Build adjacency for display
-        downstream: Dict[str, List[str]] = defaultdict(list)
+        downstream: dict[str, list[str]] = defaultdict(list)
         for edge in graph.table_edges:
             downstream[edge.source_table].append(edge.target_table)
 
@@ -771,7 +770,7 @@ class LineageTracker:
         if not roots:
             roots = all_sources  # Fallback if cycles exist
 
-        def _render_tree(table: str, indent: int, visited: Set[str]) -> None:
+        def _render_tree(table: str, indent: int, visited: set[str]) -> None:
             prefix = "  " * indent + ("|-- " if indent > 0 else "")
             lines.append(f"{prefix}{table}")
             if table in visited:

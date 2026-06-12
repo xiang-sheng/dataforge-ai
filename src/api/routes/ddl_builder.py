@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import PlainTextResponse
@@ -18,7 +18,6 @@ from pydantic import BaseModel, Field
 
 from src.core.schemas import ColumnInfo, TableSchema
 from src.db.duckdb_sandbox import (
-    BatchDDLResult,
     DDLVerifyResult,
     DuckDBSandbox,
     PipelineStep,
@@ -28,7 +27,6 @@ from src.db.duckdb_sandbox import (
 from src.warehouse.convention_loader import (
     ConventionLoader,
     ConventionValidator,
-    TableConvention,
     ValidationResult,
 )
 from src.warehouse.ddl_auto_builder import (
@@ -56,15 +54,15 @@ _TARGET_DB_TYPES = ("clickhouse", "hive", "doris", "mysql", "postgresql", "duckd
 class DDLBuildRequest(BaseModel):
     """Payload for running the full DDL generation pipeline."""
 
-    source_connection_id: Optional[str] = Field(
+    source_connection_id: str | None = Field(
         None,
         description="Connection ID for live DB introspection.  When omitted, source_schemas must be provided.",
     )
-    source_tables: List[str] = Field(
+    source_tables: list[str] = Field(
         default_factory=list,
         description="Source table names to process (used with source_connection_id).",
     )
-    source_schemas: Optional[List[TableSchema]] = Field(
+    source_schemas: list[TableSchema] | None = Field(
         None,
         description="Provide table schemas directly instead of introspecting a live connection.",
     )
@@ -76,7 +74,7 @@ class DDLBuildRequest(BaseModel):
         "clickhouse",
         description="Target database engine: clickhouse, hive, doris, mysql, postgresql, or duckdb.",
     )
-    convention_path: Optional[str] = Field(
+    convention_path: str | None = Field(
         None,
         description="Path to a convention YAML file.  None uses built-in defaults.",
     )
@@ -103,16 +101,16 @@ class DDLBuildRequest(BaseModel):
 class DDLVerifyRequest(BaseModel):
     """Payload for verifying DDL and/or SQL in the DuckDB sandbox."""
 
-    ddl_statements: List[str] = Field(
+    ddl_statements: list[str] = Field(
         ...,
         min_length=1,
         description="DDL statements to execute (CREATE TABLE, ALTER TABLE, etc.).",
     )
-    computation_sql: Optional[List[str]] = Field(
+    computation_sql: list[str] | None = Field(
         None,
         description="Optional computation SQL statements to run after DDL.",
     )
-    sample_data: Optional[Dict[str, List[Dict[str, Any]]]] = Field(
+    sample_data: dict[str, list[dict[str, Any]]] | None = Field(
         None,
         description=(
             "Optional sample data keyed by table name.  Each value is a list of "
@@ -131,19 +129,19 @@ class DDLVerifyRequest(BaseModel):
 class DDLVerifyResponse(BaseModel):
     """Aggregated result of a DDL/SQL verification run."""
 
-    ddl_results: List[DDLVerifyResult] = Field(
+    ddl_results: list[DDLVerifyResult] = Field(
         default_factory=list,
         description="Per-DDL verification results.",
     )
-    sql_results: List[SQLVerifyResult] = Field(
+    sql_results: list[SQLVerifyResult] = Field(
         default_factory=list,
         description="Per-SQL verification results.",
     )
-    pipeline_result: Optional[PipelineVerifyResult] = Field(
+    pipeline_result: PipelineVerifyResult | None = Field(
         None,
         description="Pipeline verification result when verify_pipeline=True.",
     )
-    tables_created: List[str] = Field(
+    tables_created: list[str] = Field(
         default_factory=list,
         description="Names of tables successfully created in the sandbox.",
     )
@@ -164,11 +162,11 @@ class ConventionValidateResponse(BaseModel):
     is_valid: bool = Field(..., description="Whether the convention passed all checks.")
     version: str = Field(default="", description="Convention version string.")
     description: str = Field(default="", description="Convention description.")
-    warnings: List[str] = Field(
+    warnings: list[str] = Field(
         default_factory=list,
         description="Human-readable warning messages.",
     )
-    errors: List[str] = Field(
+    errors: list[str] = Field(
         default_factory=list,
         description="Error messages (non-empty means the file is invalid).",
     )
@@ -178,11 +176,11 @@ class ConventionValidateResponse(BaseModel):
         le=100,
         description="Completeness score from 0 (many sections missing) to 100 (all sections present).",
     )
-    sections_present: List[str] = Field(
+    sections_present: list[str] = Field(
         default_factory=list,
         description="Top-level convention sections that were found.",
     )
-    sections_missing: List[str] = Field(
+    sections_missing: list[str] = Field(
         default_factory=list,
         description="Expected sections that were not found.",
     )
@@ -210,8 +208,8 @@ class ConventionCheckTableResponse(BaseModel):
 
     is_valid: bool
     score: int = Field(default=100, ge=0, le=100)
-    violations: List[Dict[str, Any]] = Field(default_factory=list)
-    warnings: List[str] = Field(default_factory=list)
+    violations: list[dict[str, Any]] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
 
 
 class MessageResponse(BaseModel):
@@ -292,7 +290,7 @@ async def build_ddl(payload: DDLBuildRequest) -> DDLPipelineResult:
     builder = DDLAutoBuilder(config)
 
     # -- Resolve source schemas ------------------------------------------- #
-    source_schemas: List[TableSchema] = []
+    source_schemas: list[TableSchema] = []
 
     if payload.source_schemas:
         source_schemas = payload.source_schemas
@@ -403,7 +401,7 @@ async def verify_ddl(payload: DDLVerifyRequest) -> DDLVerifyResponse:
     try:
         # -- Pipeline mode ------------------------------------------------- #
         if payload.verify_pipeline:
-            steps: List[PipelineStep] = []
+            steps: list[PipelineStep] = []
 
             # DDL steps
             for ddl in payload.ddl_statements:
@@ -448,7 +446,7 @@ async def verify_ddl(payload: DDLVerifyRequest) -> DDLVerifyResponse:
             )
 
         # -- Standard mode ------------------------------------------------- #
-        ddl_results: List[DDLVerifyResult] = []
+        ddl_results: list[DDLVerifyResult] = []
         for ddl in payload.ddl_statements:
             result = sandbox.verify_ddl(ddl)
             ddl_results.append(result)
@@ -466,7 +464,7 @@ async def verify_ddl(payload: DDLVerifyRequest) -> DDLVerifyResponse:
                     )
 
         # Run computation SQL
-        sql_results: List[SQLVerifyResult] = []
+        sql_results: list[SQLVerifyResult] = []
         if payload.computation_sql:
             for sql in payload.computation_sql:
                 sql_result = sandbox.verify_computation_sql(sql)
@@ -507,8 +505,8 @@ async def validate_convention(
 ) -> ConventionValidateResponse:
     """Validate a convention file and return the result."""
     loader = ConventionLoader()
-    errors: List[str] = []
-    warnings: List[str] = []
+    errors: list[str] = []
+    warnings: list[str] = []
 
     convention_path = payload.convention_path
     if not Path(convention_path).is_file():
@@ -539,8 +537,8 @@ async def validate_convention(
         "storage",
     ]
     conv_dict = convention.model_dump()
-    sections_present: List[str] = []
-    sections_missing: List[str] = []
+    sections_present: list[str] = []
+    sections_missing: list[str] = []
 
     for section in expected_sections:
         section_data = conv_dict.get(section)
@@ -789,7 +787,7 @@ async def check_table_against_convention(
     )
 
     # Serialise violations to dicts
-    violation_dicts: List[Dict[str, Any]] = [
+    violation_dicts: list[dict[str, Any]] = [
         {
             "severity": v.severity,
             "rule": v.rule,

@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import TYPE_CHECKING
 
-from src.agents.base import ManagedAgent
+if TYPE_CHECKING:
+    from src.agents.base import ManagedAgent
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +39,7 @@ class AgentRegistry:
         """Remove an agent by name."""
         self._agents.pop(name, None)
 
-    def get(self, name: str) -> Optional[ManagedAgent]:
+    def get(self, name: str) -> ManagedAgent | None:
         """Get an agent by name, or None if not found."""
         return self._agents.get(name)
 

@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
+from typing import TYPE_CHECKING, Any
 
-from src.agents.base import AgentResult, ManagedAgent
-from src.agents.registry import AgentRegistry
+from src.agents.base import AgentResult
 from src.agents.router import IntentRouter
+
+if TYPE_CHECKING:
+    from src.agents.registry import AgentRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -35,8 +37,8 @@ class AgentOrchestrator:
     def chat(
         self,
         message: str,
-        target_agent: Optional[str] = None,
-        context: Optional[dict[str, Any]] = None,
+        target_agent: str | None = None,
+        context: dict[str, Any] | None = None,
     ) -> AgentResult:
         """Process a user message through the appropriate agent.
 
@@ -54,10 +56,7 @@ class AgentOrchestrator:
             ctx.update(context)
 
         # Route to agent
-        if target_agent:
-            agent_name = target_agent
-        else:
-            agent_name = self.router.classify(message)
+        agent_name = target_agent or self.router.classify(message)
 
         agent = self.registry.get(agent_name)
 

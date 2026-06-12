@@ -8,9 +8,9 @@ as generating Airflow DAGs and validating pipeline configurations.
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
-from enum import Enum
-from typing import Any, Optional
+from datetime import UTC, datetime
+from enum import StrEnum
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
@@ -22,7 +22,7 @@ from src.api.deps import get_ai_provider, get_connection_manager
 # ---------------------------------------------------------------------------
 
 
-class PipelineStatus(str, Enum):
+class PipelineStatus(StrEnum):
     """ETL pipeline lifecycle status."""
 
     DRAFT = "draft"
@@ -33,7 +33,7 @@ class PipelineStatus(str, Enum):
     FAILED = "failed"
 
 
-class TaskType(str, Enum):
+class TaskType(StrEnum):
     """Types of EL tasks within a pipeline."""
 
     EXTRACT = "extract"
@@ -44,7 +44,7 @@ class TaskType(str, Enum):
     CUSTOM_PYTHON = "custom_python"
 
 
-class ScheduleType(str, Enum):
+class ScheduleType(StrEnum):
     """Pipeline schedule types."""
 
     MANUAL = "manual"
@@ -64,11 +64,11 @@ class TaskDefinition(BaseModel):
     task_id: str = Field(..., description="Unique task identifier within the pipeline.")
     task_type: TaskType = Field(..., description="Type of task.")
     name: str = Field(..., description="Human-readable task name.")
-    description: Optional[str] = Field(None, description="Task description.")
+    description: str | None = Field(None, description="Task description.")
     config: dict[str, Any] = Field(default_factory=dict, description="Task-specific configuration.")
-    sql: Optional[str] = Field(None, description="SQL to execute (for sql_execute tasks).")
-    connection_id: Optional[str] = Field(None, description="Database connection to use.")
-    database: Optional[str] = Field(None, description="Target database/schema.")
+    sql: str | None = Field(None, description="SQL to execute (for sql_execute tasks).")
+    connection_id: str | None = Field(None, description="Database connection to use.")
+    database: str | None = Field(None, description="Target database/schema.")
     dependencies: list[str] = Field(default_factory=list, description="IDs of tasks that must complete before this one.")
     retries: int = Field(0, ge=0, le=10, description="Number of retry attempts on failure.")
     timeout_seconds: int = Field(3600, ge=60, description="Task timeout in seconds.")
@@ -78,11 +78,11 @@ class PipelineCreateRequest(BaseModel):
     """Request body for creating an ETL pipeline."""
 
     name: str = Field(..., min_length=1, max_length=256, description="Pipeline name.")
-    description: Optional[str] = Field(None, description="Pipeline description.")
+    description: str | None = Field(None, description="Pipeline description.")
     source_connection_id: str = Field(..., description="Source database connection ID.")
     target_connection_id: str = Field(..., description="Target database connection ID.")
     schedule_type: ScheduleType = Field(ScheduleType.MANUAL, description="How the pipeline is triggered.")
-    schedule_expression: Optional[str] = Field(None, description="Cron expression or interval (e.g. '0 2 * * *' or '3600s').")
+    schedule_expression: str | None = Field(None, description="Cron expression or interval (e.g. '0 2 * * *' or '3600s').")
     tasks: list[TaskDefinition] = Field(..., min_length=1, description="Ordered list of pipeline tasks.")
     tags: list[str] = Field(default_factory=list, description="User-defined tags.")
     config: dict[str, Any] = Field(default_factory=dict, description="Pipeline-level configuration.")
@@ -91,13 +91,13 @@ class PipelineCreateRequest(BaseModel):
 class PipelineUpdateRequest(BaseModel):
     """Request body for updating a pipeline (all fields optional)."""
 
-    name: Optional[str] = Field(None, min_length=1, max_length=256)
-    description: Optional[str] = None
-    schedule_type: Optional[ScheduleType] = None
-    schedule_expression: Optional[str] = None
-    tasks: Optional[list[TaskDefinition]] = None
-    tags: Optional[list[str]] = None
-    config: Optional[dict[str, Any]] = None
+    name: str | None = Field(None, min_length=1, max_length=256)
+    description: str | None = None
+    schedule_type: ScheduleType | None = None
+    schedule_expression: str | None = None
+    tasks: list[TaskDefinition] | None = None
+    tags: list[str] | None = None
+    config: dict[str, Any] | None = None
 
 
 class PipelineResponse(BaseModel):
@@ -105,12 +105,12 @@ class PipelineResponse(BaseModel):
 
     id: str
     name: str
-    description: Optional[str] = None
+    description: str | None = None
     source_connection_id: str
     target_connection_id: str
     status: PipelineStatus = PipelineStatus.DRAFT
     schedule_type: ScheduleType
-    schedule_expression: Optional[str] = None
+    schedule_expression: str | None = None
     task_count: int
     tags: list[str] = Field(default_factory=list)
     created_at: datetime
@@ -140,7 +140,7 @@ class ValidationIssue(BaseModel):
     """A single validation issue."""
 
     severity: str = Field(..., description="'error', 'warning', or 'info'.")
-    task_id: Optional[str] = Field(None, description="Task ID if the issue is task-specific.")
+    task_id: str | None = Field(None, description="Task ID if the issue is task-specific.")
     message: str
 
 
@@ -196,7 +196,7 @@ async def create_pipeline(
     _validate_task_dependencies(payload.tasks)
 
     pipeline_id = str(uuid.uuid4())
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     pipeline_data = {
         "id": pipeline_id,
@@ -239,8 +239,8 @@ async def create_pipeline(
     description="Return all registered ETL pipelines with optional filtering by status and tags.",
 )
 async def list_pipelines(
-    status_filter: Optional[PipelineStatus] = Query(None, alias="status", description="Filter by pipeline status."),
-    tag: Optional[str] = Query(None, description="Filter by tag."),
+    status_filter: PipelineStatus | None = Query(None, alias="status", description="Filter by pipeline status."),
+    tag: str | None = Query(None, description="Filter by tag."),
     manager=Depends(get_connection_manager),
 ) -> list[PipelineResponse]:
     """List all ETL pipelines."""

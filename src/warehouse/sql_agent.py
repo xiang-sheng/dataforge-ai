@@ -9,13 +9,12 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 
 from src.warehouse.base_agent import BaseAgent, ToolCallLog
 from src.warehouse.tools import ALL_TOOLS, init_tool_context
-
 
 SYSTEM_PROMPT = """\
 你是 DataForge AI 数据分析助手。用户会用自然语言描述数据需求，你需要生成 SQL 查询并验证结果。
@@ -54,11 +53,11 @@ SYSTEM_PROMPT = """\
 class AnalysisResult:
     """Agent analysis result."""
     question: str
-    sql: Optional[str] = None
-    reasoning: Optional[str] = None
+    sql: str | None = None
+    reasoning: str | None = None
     tool_calls_log: list[ToolCallLog] = field(default_factory=list)
     success: bool = False
-    error: Optional[str] = None
+    error: str | None = None
 
 
 class SQLAgent(BaseAgent):
@@ -68,7 +67,7 @@ class SQLAgent(BaseAgent):
         self,
         llm: Any,
         db: Any,
-        convention_file: Optional[str] = None,
+        convention_file: str | None = None,
         system_prompt: str = SYSTEM_PROMPT,
     ):
         init_tool_context(db, convention_file)

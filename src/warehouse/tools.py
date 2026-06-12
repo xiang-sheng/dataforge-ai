@@ -13,22 +13,21 @@ gets its own isolated DuckDB connection and convention path.
 
 from __future__ import annotations
 
+import contextlib
 import contextvars
 import re
 from pathlib import Path
-from typing import Optional
 
 import duckdb
 from langchain_core.tools import tool
 
-
 # ---------------------------------------------------------------------------
 # Async-safe context variables (replaces module-level globals)
 # ---------------------------------------------------------------------------
-_conn_var: contextvars.ContextVar[Optional[duckdb.DuckDBPyConnection]] = (
+_conn_var: contextvars.ContextVar[duckdb.DuckDBPyConnection | None] = (
     contextvars.ContextVar("_conn_var", default=None)
 )
-_convention_var: contextvars.ContextVar[Optional[str]] = (
+_convention_var: contextvars.ContextVar[str | None] = (
     contextvars.ContextVar("_convention_var", default=None)
 )
 
@@ -38,13 +37,19 @@ _SAFE_IDENTIFIER = re.compile(r'^[A-Za-z_][A-Za-z0-9_]{0,127}$')
 
 def init_tool_context(
     db: str | duckdb.DuckDBPyConnection,
-    convention_file: Optional[str] = None,
+    convention_file: str | None = None,
 ) -> None:
     """Bind a DuckDB connection for all tools in the current async context.
 
     Safe for concurrent use — each async task gets its own isolated context.
     Call once before an agent run within the same task/coroutine.
     """
+    # Close previous connection if any (prevent resource leak)
+    old_conn = _conn_var.get()
+    if old_conn is not None:
+        with contextlib.suppress(duckdb.Error):
+            old_conn.close()
+
     if isinstance(db, str):
         _conn_var.set(duckdb.connect(db))
     else:
@@ -144,7 +149,7 @@ def describe_table(table_name: str) -> str:
 
         # Row count via parameterized query
         try:
-            cnt = get_conn().execute(
+            get_conn().execute(
                 "SELECT COUNT(*) FROM information_schema.tables "
                 "WHERE table_name = ? AND table_schema = 'main'",
                 [table_name]
@@ -198,7 +203,7 @@ def get_sample_data(table_name: str, limit: int = 5) -> str:
         lines.append("  ".join(f"{c:<20}" for c in col_names))
         lines.append("-" * (22 * len(col_names)))
         for row in rows:
-            lines.append("  ".join(f"{str(v):<20}" for v in row))
+            lines.append("  ".join(f"{v!s:<20}" for v in row))
         return "\n".join(lines)
 
     except ValueError as e:
@@ -231,17 +236,6 @@ def execute_query(sql: str) -> str:
         if not (upper.startswith("SELECT") or upper.startswith("WITH")):
             return "仅允许 SELECT / WITH 查询。建表请用 execute_ddl 工具。"
 
-        # Block dangerous keywords even inside SELECT
-        dangerous = ["INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "CREATE", "TRUNCATE"]
-        # Check for these as standalone words (not inside column/table names)
-        for kw in dangerous:
-            if re.search(rf'\b{kw}\b', upper):
-                # Allow WITH ... SELECT, but block embedded DML
-                if kw in ("INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "CREATE", "TRUNCATE"):
-                    # These in a SELECT context are usually in subqueries or CTEs
-                    # Only block if they appear outside of string literals
-                    pass  # DuckDB itself is read-only for SELECT, so this is safe
-
         result = get_conn().execute(stripped)
         rows = result.fetchall()
         cols = [desc[0] for desc in result.description]
@@ -258,7 +252,7 @@ def execute_query(sql: str) -> str:
         lines.append(header)
         lines.append("-" * len(header))
         for row in display_rows:
-            lines.append("  ".join(f"{str(v):<{widths[i]}}" for i, v in enumerate(row)))
+            lines.append("  ".join(f"{v!s:<{widths[i]}}" for i, v in enumerate(row)))
         if len(rows) > 50:
             lines.append(f"... 省略 {len(rows) - 50} 行")
 
@@ -289,19 +283,16 @@ def execute_ddl(ddl: str) -> str:
             if upper.startswith("--") or not upper:
                 continue
 
-            # DROP before CREATE to allow re-runs
-            if "CREATE TABLE" in upper:
-                m = re.search(
-                    r'CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["`]?(\w+)["`]?',
-                    stmt, re.IGNORECASE
+            # For CREATE TABLE without IF NOT EXISTS, add it automatically
+            # to avoid accidental overwrites (instead of DROP + CREATE).
+            if "CREATE TABLE" in upper and "IF NOT EXISTS" not in upper:
+                stmt = re.sub(
+                    r'CREATE\s+TABLE\s+',
+                    'CREATE TABLE IF NOT EXISTS ',
+                    stmt,
+                    count=1,
+                    flags=re.IGNORECASE,
                 )
-                if m:
-                    tbl_name = m.group(1)
-                    if _SAFE_IDENTIFIER.match(tbl_name):
-                        try:
-                            conn.execute(f'DROP TABLE IF EXISTS "{tbl_name}" CASCADE')
-                        except duckdb.Error:
-                            pass
 
             try:
                 conn.execute(stmt)
@@ -349,7 +340,11 @@ def create_table_from_query(table_name: str, select_sql: str, table_comment: str
         # Validate the SELECT SQL is actually a SELECT
         sql_upper = select_sql.strip().upper()
         if not (sql_upper.startswith("SELECT") or sql_upper.startswith("WITH")):
-            return f"select_sql 必须是 SELECT 或 WITH 查询，不允许 DML/DDL 操作。"
+            return "select_sql 必须是 SELECT 或 WITH 查询，不允许 DML/DDL 操作。"
+
+        # Block multi-statement injection (e.g. "SELECT 1; DROP TABLE x")
+        if ";" in select_sql.strip().rstrip(";"):
+            return "select_sql 不允许包含分号（防止多语句注入）。请只传入单条 SELECT 查询。"
 
         # Create table from query
         conn.execute(f'CREATE TABLE "{table_name}" AS {select_sql}')
@@ -373,7 +368,7 @@ def create_table_from_query(table_name: str, select_sql: str, table_comment: str
         lines.append(f"  字段: {len(cols)} 个")
         if table_comment:
             lines.append(f"  说明: {table_comment}")
-        lines.append(f"\n  字段列表:")
+        lines.append("\n  字段列表:")
         for name, dtype in cols:
             lines.append(f"    - {name} ({dtype})")
 
@@ -568,11 +563,11 @@ def compare_tables(table_a: str, table_b: str) -> str:
 
         # Redundancy verdict
         if similarity >= 0.8 and type_match / max(len(common), 1) >= 0.8:
-            lines.append(f"\n  ⚠ 高度相似 — 可能是冗余表，建议合并审查")
+            lines.append("\n  ⚠ 高度相似 — 可能是冗余表，建议合并审查")
         elif similarity >= 0.5:
-            lines.append(f"\n  △ 部分重叠 — 有合并优化空间")
+            lines.append("\n  △ 部分重叠 — 有合并优化空间")
         else:
-            lines.append(f"\n  ✓ 差异较大 — 无明显冗余")
+            lines.append("\n  ✓ 差异较大 — 无明显冗余")
 
         return "\n".join(lines)
 

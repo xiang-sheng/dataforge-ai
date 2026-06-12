@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 DataForge AI - Schema management for data warehouse layers.
 
@@ -11,11 +10,10 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
 
-from src.ai.provider import BaseAIProvider, ChatMessage
 from src.ai.prompts import default_registry as prompt_registry
-from src.warehouse.layers import WarehouseLayer, DEFAULT_LAYER_CONFIGS
+from src.ai.provider import BaseAIProvider, ChatMessage
+from src.warehouse.layers import WarehouseLayer
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +39,7 @@ class ColumnSchema:
     name: str
     data_type: str
     nullable: bool = True
-    default_value: Optional[str] = None
+    default_value: str | None = None
     comment: str = ""
     is_partition_key: bool = False
     is_primary_key: bool = False
@@ -65,13 +63,13 @@ class TableSchema:
 
     table_name: str
     layer: WarehouseLayer = WarehouseLayer.DWD
-    columns: List[ColumnSchema] = field(default_factory=list)
+    columns: list[ColumnSchema] = field(default_factory=list)
     comment: str = ""
     storage_format: str = "Parquet"
     compression: str = "snappy"
-    partition_keys: List[str] = field(default_factory=list)
+    partition_keys: list[str] = field(default_factory=list)
     lifecycle_days: int = 365
-    properties: Dict[str, str] = field(default_factory=dict)
+    properties: dict[str, str] = field(default_factory=dict)
 
     def to_ddl(self, dialect: str = "Hive") -> str:
         """Generate a CREATE TABLE DDL statement for this schema.
@@ -82,10 +80,10 @@ class TableSchema:
         Returns:
             A DDL string.
         """
-        lines: List[str] = []
+        lines: list[str] = []
         lines.append(f"CREATE TABLE IF NOT EXISTS {self.table_name} (")
 
-        col_defs: List[str] = []
+        col_defs: list[str] = []
         for col in self.columns:
             if col.is_partition_key:
                 continue  # Partition columns go after the main body
@@ -144,9 +142,9 @@ class SourceConfig:
 
     source_type: str = "mysql"
     source_table: str = ""
-    columns: List[Dict[str, str]] = field(default_factory=list)
+    columns: list[dict[str, str]] = field(default_factory=list)
     connection_id: str = ""
-    incremental_key: Optional[str] = None
+    incremental_key: str | None = None
     extraction_strategy: str = "full"
 
 
@@ -167,7 +165,7 @@ class BusinessRule:
     description: str = ""
     rule_type: str = "cleansing"
     expression: str = ""
-    source_columns: List[str] = field(default_factory=list)
+    source_columns: list[str] = field(default_factory=list)
     target_column: str = ""
 
 
@@ -186,7 +184,7 @@ class AggregationRule:
     metric_name: str = ""
     aggregation_function: str = "SUM"
     source_column: str = ""
-    group_by_columns: List[str] = field(default_factory=list)
+    group_by_columns: list[str] = field(default_factory=list)
     time_granularity: str = "1d"
 
 
@@ -204,8 +202,8 @@ class MigrationScript:
 
     from_version: str = ""
     to_version: str = ""
-    statements: List[str] = field(default_factory=list)
-    rollback_statements: List[str] = field(default_factory=list)
+    statements: list[str] = field(default_factory=list)
+    rollback_statements: list[str] = field(default_factory=list)
     description: str = ""
 
     def to_sql(self) -> str:
@@ -285,7 +283,7 @@ class SchemaManager:
         ods_table_name = f"ods_{source_config.source_table}"
 
         # Build column list from source config
-        column_lines: List[str] = []
+        column_lines: list[str] = []
         for col in source_config.columns:
             col_name = col.get("name", "unknown")
             col_type = self._map_data_type(
@@ -332,10 +330,10 @@ class SchemaManager:
 
     async def design_dwd_layer(
         self,
-        ods_tables: List[TableSchema],
-        business_rules: Optional[List[BusinessRule]] = None,
+        ods_tables: list[TableSchema],
+        business_rules: list[BusinessRule] | None = None,
         domain: str = "general",
-    ) -> List[TableSchema]:
+    ) -> list[TableSchema]:
         """Design DWD (detail) layer schemas from ODS tables.
 
         Uses AI to analyze the ODS schemas and business rules, then generates
@@ -387,10 +385,10 @@ class SchemaManager:
 
     async def design_dws_layer(
         self,
-        dwd_tables: List[TableSchema],
-        aggregation_rules: Optional[List[AggregationRule]] = None,
+        dwd_tables: list[TableSchema],
+        aggregation_rules: list[AggregationRule] | None = None,
         domain: str = "general",
-    ) -> List[TableSchema]:
+    ) -> list[TableSchema]:
         """Design DWS (summary) layer schemas from DWD tables.
 
         Creates pre-aggregated tables at common granularity levels based on
@@ -446,10 +444,10 @@ class SchemaManager:
 
     async def design_ads_layer(
         self,
-        dws_tables: List[TableSchema],
+        dws_tables: list[TableSchema],
         report_requirements: str,
         domain: str = "general",
-    ) -> List[TableSchema]:
+    ) -> list[TableSchema]:
         """Design ADS (application) layer schemas from DWS tables.
 
         Creates application-specific tables tailored for dashboards, reports,
@@ -513,8 +511,8 @@ class SchemaManager:
         Returns:
             A ``MigrationScript`` with forward and rollback SQL.
         """
-        statements: List[str] = []
-        rollback_statements: List[str] = []
+        statements: list[str] = []
+        rollback_statements: list[str] = []
 
         # Build column maps
         from_cols = {c.name: c for c in from_schema.columns}
@@ -578,7 +576,7 @@ class SchemaManager:
                 f"ALTER TABLE {to_schema.table_name} COMMENT '{to_schema.comment}'"
             )
 
-        description_parts: List[str] = []
+        description_parts: list[str] = []
         added = set(to_cols.keys()) - set(from_cols.keys())
         removed = set(from_cols.keys()) - set(to_cols.keys())
         changed = {
@@ -617,7 +615,7 @@ class SchemaManager:
         type_upper = source_type.upper()
 
         # Common mappings to Hive / Spark types
-        _mappings: Dict[str, Dict[str, str]] = {
+        _mappings: dict[str, dict[str, str]] = {
             "mysql": {
                 "INT": "INT",
                 "INTEGER": "INT",
@@ -676,7 +674,7 @@ class SchemaManager:
         self,
         ai_response: str,
         layer: WarehouseLayer,
-    ) -> List[TableSchema]:
+    ) -> list[TableSchema]:
         """Parse AI response text into structured TableSchema objects.
 
         Extracts CREATE TABLE statements from the AI response and parses them
@@ -691,7 +689,7 @@ class SchemaManager:
         """
         import re
 
-        schemas: List[TableSchema] = []
+        schemas: list[TableSchema] = []
 
         # Find all CREATE TABLE blocks
         ddl_blocks = re.findall(
@@ -701,7 +699,7 @@ class SchemaManager:
         )
 
         for table_name, body in ddl_blocks:
-            columns: List[ColumnSchema] = []
+            columns: list[ColumnSchema] = []
             for line in body.splitlines():
                 line = line.strip().rstrip(",")
                 if not line or line.startswith("--"):
@@ -735,7 +733,7 @@ class SchemaManager:
                 ai_response,
                 re.IGNORECASE,
             )
-            partition_keys: List[str] = []
+            partition_keys: list[str] = []
             if partition_match:
                 pk_body = partition_match.group(1)
                 partition_keys = re.findall(r"(\w+)\s+\w+", pk_body)

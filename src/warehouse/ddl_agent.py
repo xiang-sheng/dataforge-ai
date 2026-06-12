@@ -10,13 +10,12 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 
 from src.warehouse.base_agent import BaseAgent, ToolCallLog
 from src.warehouse.tools import ALL_TOOLS, init_tool_context
-
 
 SYSTEM_PROMPT = """\
 你是 DataForge AI 数仓架构师。根据源库现有表信息，为数仓指定层生成规范 DDL。
@@ -57,11 +56,11 @@ class DDLAgentResult:
     """Agent DDL generation result."""
     source_table: str
     target_layer: str
-    ddl: Optional[str] = None
-    verification: Optional[str] = None
+    ddl: str | None = None
+    verification: str | None = None
     tool_calls_log: list[ToolCallLog] = field(default_factory=list)
     success: bool = False
-    error: Optional[str] = None
+    error: str | None = None
 
 
 class DDLAgent(BaseAgent):
@@ -71,7 +70,7 @@ class DDLAgent(BaseAgent):
         self,
         llm: Any,
         db: Any,
-        convention_file: Optional[str] = None,
+        convention_file: str | None = None,
         system_prompt: str = SYSTEM_PROMPT,
     ):
         init_tool_context(db, convention_file)

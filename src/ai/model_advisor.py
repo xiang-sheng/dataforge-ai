@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 DataForge AI - Data modeling advisor.
 
@@ -8,14 +7,12 @@ design, schema review, partitioning strategy, and index recommendations.
 
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any, Dict, List, Optional
+from enum import StrEnum
 
-from src.ai.provider import BaseAIProvider, ChatMessage
 from src.ai.prompts import default_registry as prompt_registry
+from src.ai.provider import BaseAIProvider, ChatMessage
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +21,7 @@ logger = logging.getLogger(__name__)
 # Data models
 # ---------------------------------------------------------------------------
 
-class SchemaType(str, Enum):
+class SchemaType(StrEnum):
     """Supported dimensional-model schema types."""
 
     STAR = "star"
@@ -33,7 +30,7 @@ class SchemaType(str, Enum):
     ONE_DATA = "one_data"
 
 
-class TableType(str, Enum):
+class TableType(StrEnum):
     """Warehouse table classification."""
 
     FACT = "fact"
@@ -83,8 +80,8 @@ class TableDesign:
     table_name: str
     table_type: TableType = TableType.FACT
     grain: str = ""
-    columns: List[ColumnDef] = field(default_factory=list)
-    partition_keys: List[str] = field(default_factory=list)
+    columns: list[ColumnDef] = field(default_factory=list)
+    partition_keys: list[str] = field(default_factory=list)
     description: str = ""
     rationale: str = ""
 
@@ -101,9 +98,9 @@ class ModelingRecommendation:
         raw_response: The full AI model response for reference.
     """
 
-    tables: List[TableDesign] = field(default_factory=list)
+    tables: list[TableDesign] = field(default_factory=list)
     summary: str = ""
-    trade_offs: List[str] = field(default_factory=list)
+    trade_offs: list[str] = field(default_factory=list)
     naming_convention: str = ""
     raw_response: str = ""
 
@@ -122,7 +119,7 @@ class IndexRecommendation:
 
     table_name: str
     index_name: str
-    columns: List[str]
+    columns: list[str]
     index_type: str = "btree"
     rationale: str = ""
 
@@ -140,7 +137,7 @@ class PartitionRecommendation:
     """
 
     table_name: str
-    partition_columns: List[str]
+    partition_columns: list[str]
     granularity: str = "daily"
     strategy_description: str = ""
     ddl_snippet: str = ""
@@ -158,8 +155,8 @@ class SchemaReviewResult:
     """
 
     overall_score: float = 0.0
-    findings: List[str] = field(default_factory=list)
-    recommendations: List[str] = field(default_factory=list)
+    findings: list[str] = field(default_factory=list)
+    recommendations: list[str] = field(default_factory=list)
     raw_response: str = ""
 
 
@@ -196,7 +193,7 @@ class ModelAdvisor:
     async def suggest_schema(
         self,
         requirements: str,
-        existing_tables: Optional[List[str]] = None,
+        existing_tables: list[str] | None = None,
         schema_type: SchemaType = SchemaType.STAR,
         naming_convention: str = "snake_case",
         query_patterns: str = "Aggregation, filtering, time-series analysis",
@@ -248,7 +245,7 @@ class ModelAdvisor:
     async def design_dimension_model(
         self,
         business_process: str,
-        entities: List[str],
+        entities: list[str],
         schema_type: SchemaType = SchemaType.STAR,
         naming_convention: str = "snake_case",
     ) -> ModelingRecommendation:
@@ -335,7 +332,7 @@ class ModelAdvisor:
         table_schema: str,
         query_patterns: str,
         dialect: str = "PostgreSQL",
-    ) -> List[IndexRecommendation]:
+    ) -> list[IndexRecommendation]:
         """Recommend indexes for a table based on query patterns.
 
         Args:
@@ -411,7 +408,7 @@ class ModelAdvisor:
     # -- Internal helpers ---------------------------------------------------
 
     @staticmethod
-    def _parse_table_designs(response_text: str) -> List[TableDesign]:
+    def _parse_table_designs(response_text: str) -> list[TableDesign]:
         """Parse the AI response to extract structured table designs.
 
         This is a best-effort parser that looks for common patterns in the
@@ -423,8 +420,8 @@ class ModelAdvisor:
         Returns:
             A list of ``TableDesign`` objects.
         """
-        tables: List[TableDesign] = []
-        current_table: Optional[TableDesign] = None
+        tables: list[TableDesign] = []
+        current_table: TableDesign | None = None
 
         for line in response_text.splitlines():
             stripped = line.strip()
@@ -467,7 +464,7 @@ class ModelAdvisor:
         """Extract a text section by keyword from the AI response."""
         lines = text.splitlines()
         collecting = False
-        result_lines: List[str] = []
+        result_lines: list[str] = []
         for line in lines:
             if keyword.lower() in line.lower() and line.strip().startswith("#"):
                 collecting = True
@@ -479,11 +476,11 @@ class ModelAdvisor:
         return "\n".join(result_lines).strip()
 
     @staticmethod
-    def _extract_list_section(text: str, keyword: str) -> List[str]:
+    def _extract_list_section(text: str, keyword: str) -> list[str]:
         """Extract bullet-list items from a section matching *keyword*."""
         lines = text.splitlines()
         collecting = False
-        items: List[str] = []
+        items: list[str] = []
         for line in lines:
             if keyword.lower() in line.lower() and line.strip().startswith("#"):
                 collecting = True
@@ -543,11 +540,11 @@ class ModelAdvisor:
     def _parse_index_recommendations(
         text: str,
         table_name: str,
-    ) -> List[IndexRecommendation]:
+    ) -> list[IndexRecommendation]:
         """Parse index recommendations from the AI response."""
         import re
 
-        recommendations: List[IndexRecommendation] = []
+        recommendations: list[IndexRecommendation] = []
 
         # Look for CREATE INDEX statements
         index_pattern = re.compile(

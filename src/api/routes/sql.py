@@ -7,8 +7,8 @@ explanation, optimization, cross-dialect translation, and execution.
 
 from __future__ import annotations
 
-from enum import Enum
-from typing import Any, Optional
+from enum import StrEnum
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
@@ -20,7 +20,7 @@ from src.api.deps import get_ai_provider, get_connection_manager
 # ---------------------------------------------------------------------------
 
 
-class SQLDialect(str, Enum):
+class SQLDialect(StrEnum):
     """Supported SQL dialects."""
 
     CLICKHOUSE = "clickhouse"
@@ -45,17 +45,17 @@ class SQLGenerateRequest(BaseModel):
 
     prompt: str = Field(..., min_length=1, description="Natural-language description of the desired query.")
     dialect: SQLDialect = Field(SQLDialect.CLICKHOUSE, description="Target SQL dialect.")
-    schema_context: Optional[str] = Field(
+    schema_context: str | None = Field(
         None,
         description="DDL or schema description to ground the generation (if omitted, the AI uses the connection metadata).",
     )
-    connection_id: Optional[str] = Field(
+    connection_id: str | None = Field(
         None,
         description="Connection ID whose schema should be used as context.",
     )
-    database: Optional[str] = Field(None, description="Database/schema to introspect for context.")
-    max_results: Optional[int] = Field(None, ge=1, description="Desired LIMIT clause value.")
-    additional_instructions: Optional[str] = Field(None, description="Extra instructions (e.g. 'use CTEs', 'avoid subqueries').")
+    database: str | None = Field(None, description="Database/schema to introspect for context.")
+    max_results: int | None = Field(None, ge=1, description="Desired LIMIT clause value.")
+    additional_instructions: str | None = Field(None, description="Extra instructions (e.g. 'use CTEs', 'avoid subqueries').")
 
 
 class SQLGenerateResponse(BaseModel):
@@ -91,7 +91,7 @@ class SQLOptimizeRequest(BaseModel):
 
     sql: str = Field(..., min_length=1, description="SQL statement to optimize.")
     dialect: SQLDialect = Field(SQLDialect.CLICKHOUSE, description="Target dialect.")
-    schema_context: Optional[str] = Field(None, description="DDL or schema information for optimization context.")
+    schema_context: str | None = Field(None, description="DDL or schema information for optimization context.")
     optimization_goals: list[str] = Field(
         default_factory=lambda: ["performance"],
         description="Optimization priorities: 'performance', 'readability', 'cost'.",
@@ -104,7 +104,7 @@ class SQLOptimizeResponse(BaseModel):
     original_sql: str
     optimized_sql: str = Field(..., description="The optimized SQL statement.")
     changes: list[str] = Field(default_factory=list, description="List of changes made and why.")
-    estimated_improvement: Optional[str] = Field(None, description="Estimated performance improvement description.")
+    estimated_improvement: str | None = Field(None, description="Estimated performance improvement description.")
     warnings: list[str] = Field(default_factory=list, description="Things to be aware of with the optimized query.")
 
 
@@ -133,7 +133,7 @@ class SQLExecuteRequest(BaseModel):
 
     sql: str = Field(..., min_length=1, description="SQL statement to execute.")
     connection_id: str = Field(..., description="Target connection ID.")
-    database: Optional[str] = Field(None, description="Database/schema context.")
+    database: str | None = Field(None, description="Database/schema context.")
     parameters: dict[str, Any] = Field(default_factory=dict, description="Parameterized query values.")
     max_rows: int = Field(1000, ge=1, le=100000, description="Maximum number of rows to return.")
     timeout_seconds: int = Field(30, ge=1, le=600, description="Query timeout in seconds.")
@@ -147,7 +147,7 @@ class SQLExecuteResponse(BaseModel):
     row_count: int = Field(0, description="Number of rows returned.")
     execution_time_ms: float = Field(0.0, description="Server-side execution time in milliseconds.")
     truncated: bool = Field(False, description="Whether the result was truncated due to max_rows.")
-    statement_type: Optional[str] = Field(None, description="Type of statement (SELECT, INSERT, DDL, etc.).")
+    statement_type: str | None = Field(None, description="Type of statement (SELECT, INSERT, DDL, etc.).")
 
 
 # ---------------------------------------------------------------------------

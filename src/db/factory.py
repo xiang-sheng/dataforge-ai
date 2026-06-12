@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Adapter factory for DataForge AI.
 
@@ -22,13 +21,15 @@ import importlib
 import inspect
 import logging
 import pkgutil
-from typing import Dict, Optional, Set, Type
-
-from sqlalchemy.ext.asyncio import AsyncEngine
+from typing import TYPE_CHECKING, ClassVar
 
 from src.core.exceptions import ConnectionError
-from src.core.schemas import ConnectionConfig, DatabaseType
 from src.db.base import AbstractBaseAdapter
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncEngine
+
+    from src.core.schemas import ConnectionConfig
 
 logger = logging.getLogger(__name__)
 
@@ -43,15 +44,15 @@ class AdapterFactory:
         - ``_loaded_modules``: tracks which modules have been scanned
     """
 
-    _registry: Dict[str, Type[AbstractBaseAdapter]] = {}
-    _loaded_modules: Set[str] = set()
+    _registry: ClassVar[dict[str, type[AbstractBaseAdapter]]] = {}
+    _loaded_modules: ClassVar[set[str]] = set()
 
     # ------------------------------------------------------------------ #
     # Registration
     # ------------------------------------------------------------------ #
 
     @classmethod
-    def register(cls, db_type: str, adapter_class: Type[AbstractBaseAdapter]) -> None:
+    def register(cls, db_type: str, adapter_class: type[AbstractBaseAdapter]) -> None:
         """
         Register an adapter class for the given ``db_type`` key.
 
@@ -85,7 +86,7 @@ class AdapterFactory:
     # ------------------------------------------------------------------ #
 
     @classmethod
-    def discover_adapters(cls, package_path: Optional[str] = None) -> None:
+    def discover_adapters(cls, package_path: str | None = None) -> None:
         """
         Scan the ``src.db`` package (or a custom path) for modules whose
         names end with ``_adapter`` and register any
@@ -188,7 +189,7 @@ class AdapterFactory:
 
         adapter_class = cls._registry.get(db_type_lower)
         if adapter_class is None:
-            available = ", ".join(sorted(cls._registry.keys()))
+            ", ".join(sorted(cls._registry.keys()))
             raise ConnectionError(
                 message=f"No adapter registered for database type '{db_type}'.",
                 code="UNSUPPORTED_DB_TYPE",
@@ -221,7 +222,7 @@ class AdapterFactory:
     # ------------------------------------------------------------------ #
 
     @classmethod
-    def list_available_adapters(cls) -> Dict[str, str]:
+    def list_available_adapters(cls) -> dict[str, str]:
         """
         Return a mapping of ``db_type`` -> adapter class name for all
         registered adapters.  Triggers discovery if the registry is empty.
@@ -241,7 +242,7 @@ class AdapterFactory:
         return db_type.lower() in cls._registry
 
     @classmethod
-    def get_adapter_class(cls, db_type: str) -> Optional[Type[AbstractBaseAdapter]]:
+    def get_adapter_class(cls, db_type: str) -> type[AbstractBaseAdapter] | None:
         """Return the adapter class for ``db_type``, or ``None``."""
         if not cls._registry:
             cls.discover_adapters()

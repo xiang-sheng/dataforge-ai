@@ -8,9 +8,9 @@ introspecting remote schemas (databases, tables, columns).
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
-from enum import Enum
-from typing import Any, Optional
+from datetime import UTC, datetime
+from enum import StrEnum
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field, SecretStr
@@ -22,7 +22,7 @@ from src.api.deps import get_connection_manager, get_db_adapter
 # ---------------------------------------------------------------------------
 
 
-class DatabaseType(str, Enum):
+class DatabaseType(StrEnum):
     """Supported database engines."""
 
     POSTGRESQL = "postgresql"
@@ -35,7 +35,7 @@ class DatabaseType(str, Enum):
     STARROCKS = "starrocks"
 
 
-class ConnectionStatus(str, Enum):
+class ConnectionStatus(StrEnum):
     """Connection health status."""
 
     ACTIVE = "active"
@@ -57,7 +57,7 @@ class ConnectionCreate(BaseModel):
     port: int = Field(..., gt=0, lt=65536, description="Database port.")
     username: str = Field(..., description="Authentication username.")
     password: SecretStr = Field(..., description="Authentication password.")
-    default_database: Optional[str] = Field(None, description="Default database/schema to use.")
+    default_database: str | None = Field(None, description="Default database/schema to use.")
     extra_params: dict[str, Any] = Field(default_factory=dict, description="Additional driver-specific parameters.")
     tags: list[str] = Field(default_factory=list, description="User-defined tags for grouping.")
 
@@ -65,14 +65,14 @@ class ConnectionCreate(BaseModel):
 class ConnectionUpdate(BaseModel):
     """Payload for updating an existing connection (all fields optional)."""
 
-    name: Optional[str] = Field(None, min_length=1, max_length=128)
-    host: Optional[str] = None
-    port: Optional[int] = Field(None, gt=0, lt=65536)
-    username: Optional[str] = None
-    password: Optional[SecretStr] = None
-    default_database: Optional[str] = None
-    extra_params: Optional[dict[str, Any]] = None
-    tags: Optional[list[str]] = None
+    name: str | None = Field(None, min_length=1, max_length=128)
+    host: str | None = None
+    port: int | None = Field(None, gt=0, lt=65536)
+    username: str | None = None
+    password: SecretStr | None = None
+    default_database: str | None = None
+    extra_params: dict[str, Any] | None = None
+    tags: list[str] | None = None
 
 
 class ConnectionResponse(BaseModel):
@@ -84,7 +84,7 @@ class ConnectionResponse(BaseModel):
     host: str
     port: int
     username: str
-    default_database: Optional[str] = None
+    default_database: str | None = None
     status: ConnectionStatus = ConnectionStatus.INACTIVE
     tags: list[str] = Field(default_factory=list)
     created_at: datetime
@@ -97,8 +97,8 @@ class ConnectionTestResult(BaseModel):
     """Result of a connection test."""
 
     success: bool
-    latency_ms: Optional[float] = None
-    server_version: Optional[str] = None
+    latency_ms: float | None = None
+    server_version: str | None = None
     message: str = ""
 
 
@@ -106,8 +106,8 @@ class DatabaseInfo(BaseModel):
     """Basic information about a database/schema."""
 
     name: str
-    size_mb: Optional[float] = None
-    table_count: Optional[int] = None
+    size_mb: float | None = None
+    table_count: int | None = None
 
 
 class TableInfo(BaseModel):
@@ -116,9 +116,9 @@ class TableInfo(BaseModel):
     schema_name: str
     table_name: str
     table_type: str = "BASE TABLE"
-    row_count: Optional[int] = None
-    size_mb: Optional[float] = None
-    comment: Optional[str] = None
+    row_count: int | None = None
+    size_mb: float | None = None
+    comment: str | None = None
 
 
 class ColumnInfo(BaseModel):
@@ -128,8 +128,8 @@ class ColumnInfo(BaseModel):
     data_type: str
     nullable: bool = True
     is_primary_key: bool = False
-    default_value: Optional[str] = None
-    comment: Optional[str] = None
+    default_value: str | None = None
+    comment: str | None = None
     ordinal_position: int = 0
 
 
@@ -159,7 +159,7 @@ async def create_connection(
 ) -> ConnectionResponse:
     """Create and persist a new database connection."""
     connection_id = str(uuid.uuid4())
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     connection_data = {
         "id": connection_id,
@@ -191,8 +191,8 @@ async def create_connection(
     description="Return every registered connection. Passwords are never included.",
 )
 async def list_connections(
-    db_type: Optional[DatabaseType] = Query(None, description="Filter by database type."),
-    tag: Optional[str] = Query(None, description="Filter by tag."),
+    db_type: DatabaseType | None = Query(None, description="Filter by database type."),
+    tag: str | None = Query(None, description="Filter by tag."),
     manager=Depends(get_connection_manager),
 ) -> list[ConnectionResponse]:
     """Return all connections, optionally filtered."""
@@ -247,7 +247,7 @@ async def update_connection(
         update_data["password"] = update_data["password"].get_secret_value()
 
     conn.update(update_data)
-    conn["updated_at"] = datetime.now(timezone.utc)
+    conn["updated_at"] = datetime.now(UTC)
     await manager.save(connection_id, conn)
 
     return ConnectionResponse(**{k: v for k, v in conn.items() if k != "password"})

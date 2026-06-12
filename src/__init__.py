@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 DataForge AI - AI-Powered Data Warehouse Construction Platform.
 

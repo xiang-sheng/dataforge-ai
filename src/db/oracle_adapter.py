@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Oracle adapter for DataForge AI.
 
@@ -14,7 +13,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from sqlalchemy import text
 
@@ -22,7 +21,6 @@ from src.core.exceptions import ConnectionError, QueryExecutionError
 from src.core.schemas import (
     ColumnDataType,
     ColumnInfo,
-    ConnectionConfig,
     ConnectionTestResult,
     IndexInfo,
     IndexType,
@@ -33,7 +31,7 @@ from src.db.base import AbstractBaseAdapter
 
 logger = logging.getLogger(__name__)
 
-_ORACLE_TYPE_MAP: Dict[str, ColumnDataType] = {
+_ORACLE_TYPE_MAP: dict[str, ColumnDataType] = {
     "number": ColumnDataType.DECIMAL,
     "integer": ColumnDataType.INTEGER,
     "float": ColumnDataType.FLOAT,
@@ -139,7 +137,7 @@ class OracleAdapter(AbstractBaseAdapter):
     # Metadata — databases & schemas
     # ------------------------------------------------------------------ #
 
-    async def get_databases(self) -> List[str]:
+    async def get_databases(self) -> list[str]:
         # Oracle uses a single database per instance; return the DB name
         rows = await self.execute_query(
             "SELECT SYS_CONTEXT('USERENV', 'DB_NAME') AS db_name FROM DUAL"
@@ -148,7 +146,7 @@ class OracleAdapter(AbstractBaseAdapter):
             return [rows[0].get("db_name", "")]
         return []
 
-    async def get_schemas(self, database: Optional[str] = None) -> List[str]:
+    async def get_schemas(self, database: str | None = None) -> list[str]:
         rows = await self.execute_query(
             """
             SELECT username
@@ -164,17 +162,17 @@ class OracleAdapter(AbstractBaseAdapter):
 
     async def get_tables(
         self,
-        database: Optional[str] = None,
-        schema: Optional[str] = None,
-        table_type: Optional[str] = None,
-    ) -> List[str]:
+        database: str | None = None,
+        schema: str | None = None,
+        table_type: str | None = None,
+    ) -> list[str]:
         owner = (self._default_schema(schema) or self.config.username or "").upper()
         sql = """
             SELECT table_name
             FROM all_tables
             WHERE owner = :owner
         """
-        params: Dict[str, Any] = {"owner": owner}
+        params: dict[str, Any] = {"owner": owner}
         sql += " ORDER BY table_name"
         rows = await self.execute_query(sql, params)
         tables = [row["table_name"] for row in rows]
@@ -189,8 +187,8 @@ class OracleAdapter(AbstractBaseAdapter):
     async def get_table_schema(
         self,
         table_name: str,
-        database: Optional[str] = None,
-        schema: Optional[str] = None,
+        database: str | None = None,
+        schema: str | None = None,
     ) -> TableSchema:
         owner = (self._default_schema(schema) or self.config.username or "").upper()
         db = self._default_database(database)
@@ -241,9 +239,9 @@ class OracleAdapter(AbstractBaseAdapter):
     async def get_columns(
         self,
         table_name: str,
-        database: Optional[str] = None,
-        schema: Optional[str] = None,
-    ) -> List[ColumnInfo]:
+        database: str | None = None,
+        schema: str | None = None,
+    ) -> list[ColumnInfo]:
         owner = (self._default_schema(schema) or self.config.username or "").upper()
         sql = """
             SELECT
@@ -275,7 +273,7 @@ class OracleAdapter(AbstractBaseAdapter):
         rows = await self.execute_query(
             sql, {"owner": owner, "tbl": table_name.upper()}
         )
-        columns: List[ColumnInfo] = []
+        columns: list[ColumnInfo] = []
         for row in rows:
             data_type = row["data_type"]
             # Build display type
@@ -309,9 +307,9 @@ class OracleAdapter(AbstractBaseAdapter):
     async def get_indexes(
         self,
         table_name: str,
-        database: Optional[str] = None,
-        schema: Optional[str] = None,
-    ) -> List[IndexInfo]:
+        database: str | None = None,
+        schema: str | None = None,
+    ) -> list[IndexInfo]:
         owner = (self._default_schema(schema) or self.config.username or "").upper()
         sql = """
             SELECT
@@ -332,7 +330,7 @@ class OracleAdapter(AbstractBaseAdapter):
         rows = await self.execute_query(
             sql, {"owner": owner, "tbl": table_name.upper()}
         )
-        indexes: List[IndexInfo] = []
+        indexes: list[IndexInfo] = []
         for row in rows:
             if row["is_pk"] == "Y":
                 idx_type = IndexType.PRIMARY
@@ -364,16 +362,16 @@ class OracleAdapter(AbstractBaseAdapter):
     async def execute_query(
         self,
         sql: str,
-        parameters: Optional[Dict[str, Any]] = None,
-        max_rows: Optional[int] = None,
-    ) -> List[Dict[str, Any]]:
+        parameters: dict[str, Any] | None = None,
+        max_rows: int | None = None,
+    ) -> list[dict[str, Any]]:
         try:
             async with self.engine.connect() as conn:
                 result = await conn.execute(text(sql), parameters or {})
                 if result.returns_rows:
                     columns = list(result.keys())
                     rows = result.fetchmany(max_rows) if max_rows else result.fetchall()
-                    return [dict(zip(columns, row)) for row in rows]
+                    return [dict(zip(columns, row, strict=False)) for row in rows]
                 return []
         except Exception as exc:
             raise QueryExecutionError(
@@ -398,8 +396,8 @@ class OracleAdapter(AbstractBaseAdapter):
     async def get_create_table_sql(
         self,
         table_name: str,
-        database: Optional[str] = None,
-        schema: Optional[str] = None,
+        database: str | None = None,
+        schema: str | None = None,
     ) -> str:
         """
         Oracle does not have a native SHOW CREATE TABLE.  We use
@@ -430,7 +428,7 @@ class OracleAdapter(AbstractBaseAdapter):
         columns = await self.get_columns(table_name, schema=owner)
         indexes = await self.get_indexes(table_name, schema=owner)
 
-        lines: List[str] = []
+        lines: list[str] = []
         for col in columns:
             parts = [f'    "{col.name}" {col.data_type}']
             if not col.nullable:
@@ -459,8 +457,8 @@ class OracleAdapter(AbstractBaseAdapter):
     async def get_table_ddl(
         self,
         table_name: str,
-        database: Optional[str] = None,
-        schema: Optional[str] = None,
+        database: str | None = None,
+        schema: str | None = None,
     ) -> str:
         return await self.get_create_table_sql(table_name, database=database, schema=schema)
 
@@ -471,8 +469,8 @@ class OracleAdapter(AbstractBaseAdapter):
     async def get_table_stats(
         self,
         table_name: str,
-        database: Optional[str] = None,
-        schema: Optional[str] = None,
+        database: str | None = None,
+        schema: str | None = None,
     ) -> TableStats:
         owner = (self._default_schema(schema) or self.config.username or "").upper()
         sql = """

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Optional
+from typing import Any, ClassVar
 
 from src.agents.base import AgentResult, ManagedAgent
 
@@ -20,14 +20,14 @@ class SQLAgentWrapper(ManagedAgent):
 
     name = "sql_query"
     description = "智能问数：用自然语言提问，自动生成 SQL 查询并验证结果。适用于数据分析、统计报表、数据探索。"
-    intent_keywords = [
+    intent_keywords: ClassVar[list[str]] = [
         "查询", "统计", "分析", "SQL", "数据",
         "多少", "金额", "数量", "汇总", "报表",
         "购买", "消费", "订单", "销售", "月度",
         "查", "看", "计算", "排名", "对比",
     ]
 
-    def __init__(self, llm: Any, db: Any, convention_file: Optional[str] = None):
+    def __init__(self, llm: Any, db: Any, convention_file: str | None = None):
         """Initialize with LLM and database connection.
 
         Args:

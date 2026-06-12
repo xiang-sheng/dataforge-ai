@@ -5,7 +5,6 @@ import tempfile
 
 import duckdb
 import pytest
-
 from src.warehouse.tools import (
     ALL_TOOLS,
     _validate_identifier,
@@ -267,7 +266,8 @@ class TestCompareTables:
 class TestScanRedundancyCandidates:
     def test_finds_similar_tables(self, setup_db):
         """Tables with identical schemas should be flagged as candidates."""
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import MagicMock, patch
+
         from src.warehouse.embedding import CandidatePair
 
         setup_db.execute("""

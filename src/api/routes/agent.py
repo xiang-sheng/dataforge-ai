@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import os
-from typing import Optional
 
-import duckdb
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
@@ -18,10 +16,10 @@ router = APIRouter()
 
 class ChatRequest(BaseModel):
     message: str = Field(..., description="自然语言输入（自动路由到对应 Agent）", examples=["查6月各商品购买数量和金额"])
-    target_agent: Optional[str] = Field(None, description="指定 Agent 名称（跳过意图分类）")
-    db_path: Optional[str] = Field(None, description="DuckDB 文件路径")
-    convention_file: Optional[str] = Field(None, description="建表规范文件路径")
-    context: Optional[dict] = Field(None, description="额外上下文参数")
+    target_agent: str | None = Field(None, description="指定 Agent 名称（跳过意图分类）")
+    db_path: str | None = Field(None, description="DuckDB 文件路径")
+    convention_file: str | None = Field(None, description="建表规范文件路径")
+    context: dict | None = Field(None, description="额外上下文参数")
 
 
 class ChatResponse(BaseModel):
@@ -29,7 +27,7 @@ class ChatResponse(BaseModel):
     agent_name: str
     content: str
     metadata: dict = Field(default_factory=dict)
-    error: Optional[str] = None
+    error: str | None = None
 
 
 class AgentInfo(BaseModel):
@@ -40,24 +38,24 @@ class AgentInfo(BaseModel):
 
 class AnalyzeRequest(BaseModel):
     question: str = Field(..., description="自然语言数据需求", examples=["查2025年6月各商品购买数量和金额"])
-    db_path: Optional[str] = Field(None, description="DuckDB 文件路径，留空使用内存库")
-    convention_file: Optional[str] = Field(None, description="建表规范文件路径")
+    db_path: str | None = Field(None, description="DuckDB 文件路径，留空使用内存库")
+    convention_file: str | None = Field(None, description="建表规范文件路径")
 
 
 class AnalyzeResponse(BaseModel):
     success: bool
     question: str
-    sql: Optional[str] = None
-    reasoning: Optional[str] = None
+    sql: str | None = None
+    reasoning: str | None = None
     tool_calls: int = 0
-    error: Optional[str] = None
+    error: str | None = None
 
 
 class BuildDDLRequest(BaseModel):
     source_table: str = Field(..., description="源表名")
     target_layer: str = Field(..., description="目标层级: ODS/DWD/DWS/ADS")
-    db_path: Optional[str] = Field(None, description="DuckDB 文件路径")
-    convention_file: Optional[str] = Field(None, description="建表规范文件路径")
+    db_path: str | None = Field(None, description="DuckDB 文件路径")
+    convention_file: str | None = Field(None, description="建表规范文件路径")
     business_desc: str = Field("", description="业务描述")
 
 
@@ -65,9 +63,9 @@ class BuildDDLResponse(BaseModel):
     success: bool
     source_table: str
     target_layer: str
-    ddl: Optional[str] = None
+    ddl: str | None = None
     tool_calls: int = 0
-    error: Optional[str] = None
+    error: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -93,11 +91,14 @@ def _create_ll():
         )
 
 
-def _create_orchestrator(db_path: str = ":memory:", convention_file: Optional[str] = None):
+def _create_orchestrator(db_path: str = ":memory:", convention_file: str | None = None):
     """Create a fully configured AgentOrchestrator with all agents registered."""
     from src.agents import (
-        AgentRegistry, AgentOrchestrator,
-        SQLAgentWrapper, DDLAgentWrapper, GovernanceAgentWrapper,
+        AgentOrchestrator,
+        AgentRegistry,
+        DDLAgentWrapper,
+        GovernanceAgentWrapper,
+        SQLAgentWrapper,
     )
 
     llm = _create_ll()
@@ -147,7 +148,7 @@ async def unified_chat(req: ChatRequest):
             error=result.error,
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.get("/agents", response_model=list[AgentInfo])
@@ -158,7 +159,7 @@ async def list_agents():
         agents = orch.list_agents()
         return [AgentInfo(**a) for a in agents]
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 # ---------------------------------------------------------------------------
@@ -191,7 +192,7 @@ async def analyze_question(req: AnalyzeRequest):
             error=result.error,
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @router.post("/build-ddl", response_model=BuildDDLResponse)
@@ -224,4 +225,4 @@ async def build_ddl(req: BuildDDLRequest):
             error=result.error,
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e

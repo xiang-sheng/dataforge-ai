@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 
 @lru_cache
-def get_settings() -> "AppSettings":
+def get_settings() -> AppSettings:
     """Return the cached application settings singleton.
 
     The ``lru_cache`` decorator ensures the settings object is created only
@@ -33,7 +33,7 @@ def get_settings() -> "AppSettings":
     Returns:
         AppSettings: The application configuration object.
     """
-    from src.config.settings import AppSettings  # noqa: WPS433 (runtime import)
+    from src.config.settings import AppSettings
 
     return AppSettings()
 
@@ -43,7 +43,7 @@ def get_settings() -> "AppSettings":
 # ---------------------------------------------------------------------------
 
 @lru_cache
-def get_connection_manager() -> "ConnectionManager":
+def get_connection_manager() -> ConnectionManager:
     """Return the cached connection-manager singleton.
 
     The connection manager is responsible for maintaining the registry of
@@ -52,7 +52,7 @@ def get_connection_manager() -> "ConnectionManager":
     Returns:
         ConnectionManager: The global connection manager instance.
     """
-    from src.core.connection import ConnectionManager  # noqa: WPS433
+    from src.core.connection import ConnectionManager
 
     return ConnectionManager()
 
@@ -62,7 +62,7 @@ def get_connection_manager() -> "ConnectionManager":
 # ---------------------------------------------------------------------------
 
 @lru_cache
-def get_ai_provider() -> "AIProvider":
+def get_ai_provider() -> AIProvider:
     """Return the cached AI-provider singleton.
 
     The AI provider wraps the underlying LLM backend and exposes a uniform
@@ -71,7 +71,7 @@ def get_ai_provider() -> "AIProvider":
     Returns:
         AIProvider: The global AI provider instance.
     """
-    from src.core.ai_provider import AIProvider  # noqa: WPS433
+    from src.core.ai_provider import AIProvider
 
     return AIProvider()
 
@@ -82,8 +82,8 @@ def get_ai_provider() -> "AIProvider":
 
 async def get_db_adapter(
     connection_id: str,
-    manager: "ConnectionManager" = Depends(get_connection_manager),
-) -> "BaseAdapter":
+    manager: ConnectionManager = Depends(get_connection_manager),
+) -> BaseAdapter:
     """Resolve and return a live database adapter for the given *connection_id*.
 
     This dependency validates that the requested connection exists and that it

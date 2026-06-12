@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 DataForge AI - SQL generation service.
 
@@ -11,11 +10,10 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any, Dict, List, Optional
+from enum import StrEnum
 
-from src.ai.provider import BaseAIProvider, ChatMessage
 from src.ai.prompts import default_registry as prompt_registry
+from src.ai.provider import BaseAIProvider, ChatMessage
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +22,7 @@ logger = logging.getLogger(__name__)
 # Enums & data models
 # ---------------------------------------------------------------------------
 
-class SQLDialect(str, Enum):
+class SQLDialect(StrEnum):
     """Supported SQL dialects."""
 
     POSTGRESQL = "PostgreSQL"
@@ -87,8 +85,8 @@ class SchemaContext:
 
         schema_name: str
         table_name: str
-        columns: List["SchemaContext.ColumnInfo"] = field(default_factory=list)
-        primary_key: List[str] = field(default_factory=list)
+        columns: list[SchemaContext.ColumnInfo] = field(default_factory=list)
+        primary_key: list[str] = field(default_factory=list)
         comment: str = ""
 
         @property
@@ -98,9 +96,9 @@ class SchemaContext:
                 return f"{self.schema_name}.{self.table_name}"
             return self.table_name
 
-    tables: List[TableInfo] = field(default_factory=list)
-    relationships: List[tuple[str, str, str, str]] = field(default_factory=list)
-    sample_values: Dict[str, List[str]] = field(default_factory=dict)
+    tables: list[TableInfo] = field(default_factory=list)
+    relationships: list[tuple[str, str, str, str]] = field(default_factory=list)
+    sample_values: dict[str, list[str]] = field(default_factory=dict)
 
     def to_ddl_string(self) -> str:
         """Serialize the schema context into a DDL-like string for prompt injection.
@@ -108,7 +106,7 @@ class SchemaContext:
         Returns:
             A multi-line string resembling ``CREATE TABLE`` statements.
         """
-        lines: List[str] = []
+        lines: list[str] = []
         for table in self.tables:
             cols = ",\n    ".join(
                 f"{c.name} {c.data_type}"
@@ -155,7 +153,7 @@ class SQLGenerationResult:
 
     sql: str
     explanation: str = ""
-    assumptions: List[str] = field(default_factory=list)
+    assumptions: list[str] = field(default_factory=list)
     dialect: str = ""
     raw_response: str = ""
     confidence: float = 0.0
@@ -191,7 +189,7 @@ def _extract_sql_from_response(response_text: str) -> str:
     return response_text.strip()
 
 
-def _extract_assumptions(response_text: str) -> List[str]:
+def _extract_assumptions(response_text: str) -> list[str]:
     """Extract assumption lines from the AI response.
 
     Looks for lines starting with ``-`` or ``*`` under an 'Assumptions' heading.
@@ -202,7 +200,7 @@ def _extract_assumptions(response_text: str) -> List[str]:
     Returns:
         A list of assumption strings.
     """
-    assumptions: List[str] = []
+    assumptions: list[str] = []
     in_assumptions = False
     for line in response_text.splitlines():
         stripped = line.strip()
@@ -254,8 +252,8 @@ class SQLGenerator:
     async def generate_sql(
         self,
         natural_language: str,
-        db_schema: Optional[SchemaContext] = None,
-        dialect: Optional[SQLDialect] = None,
+        db_schema: SchemaContext | None = None,
+        dialect: SQLDialect | None = None,
         extra_instructions: str = "",
         include_explanation: bool = False,
     ) -> SQLGenerationResult:
@@ -319,7 +317,7 @@ class SQLGenerator:
     async def explain_sql(
         self,
         sql: str,
-        dialect: Optional[SQLDialect] = None,
+        dialect: SQLDialect | None = None,
     ) -> str:
         """Generate a plain-language explanation of a SQL query.
 
@@ -376,7 +374,7 @@ class SQLGenerator:
     async def generate_ddl(
         self,
         requirements: str,
-        dialect: Optional[SQLDialect] = None,
+        dialect: SQLDialect | None = None,
         naming_convention: str = "snake_case",
         warehouse_layer: str = "DWD",
     ) -> str:
@@ -413,7 +411,7 @@ class SQLGenerator:
     async def review_and_improve(
         self,
         sql: str,
-        dialect: Optional[SQLDialect] = None,
+        dialect: SQLDialect | None = None,
         execution_plan: str = "N/A",
         table_stats: str = "N/A",
         optimization_goals: str = "Reduce execution time and resource usage",

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 """
 Abstract base adapter for database engines.
 
@@ -20,18 +19,19 @@ Design notes:
 from __future__ import annotations
 
 import abc
-from typing import Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any
 
-from sqlalchemy.ext.asyncio import AsyncEngine
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncEngine
 
-from src.core.schemas import (
-    ColumnInfo,
-    ConnectionConfig,
-    ConnectionTestResult,
-    IndexInfo,
-    TableSchema,
-    TableStats,
-)
+    from src.core.schemas import (
+        ColumnInfo,
+        ConnectionConfig,
+        ConnectionTestResult,
+        IndexInfo,
+        TableSchema,
+        TableStats,
+    )
 
 
 class AbstractBaseAdapter(abc.ABC):
@@ -102,7 +102,7 @@ class AbstractBaseAdapter(abc.ABC):
     # ------------------------------------------------------------------ #
 
     @abc.abstractmethod
-    async def get_databases(self) -> List[str]:
+    async def get_databases(self) -> list[str]:
         """
         Return the list of databases (catalogs) visible to the current user.
 
@@ -111,7 +111,7 @@ class AbstractBaseAdapter(abc.ABC):
         """
 
     @abc.abstractmethod
-    async def get_schemas(self, database: Optional[str] = None) -> List[str]:
+    async def get_schemas(self, database: str | None = None) -> list[str]:
         """
         Return schemas within the given database (or the default database).
 
@@ -126,10 +126,10 @@ class AbstractBaseAdapter(abc.ABC):
     @abc.abstractmethod
     async def get_tables(
         self,
-        database: Optional[str] = None,
-        schema: Optional[str] = None,
-        table_type: Optional[str] = None,
-    ) -> List[str]:
+        database: str | None = None,
+        schema: str | None = None,
+        table_type: str | None = None,
+    ) -> list[str]:
         """
         Return table names in the given database / schema.
 
@@ -147,8 +147,8 @@ class AbstractBaseAdapter(abc.ABC):
     async def get_table_schema(
         self,
         table_name: str,
-        database: Optional[str] = None,
-        schema: Optional[str] = None,
+        database: str | None = None,
+        schema: str | None = None,
     ) -> TableSchema:
         """
         Return full metadata for a single table, including columns and indexes.
@@ -162,18 +162,18 @@ class AbstractBaseAdapter(abc.ABC):
     async def get_columns(
         self,
         table_name: str,
-        database: Optional[str] = None,
-        schema: Optional[str] = None,
-    ) -> List[ColumnInfo]:
+        database: str | None = None,
+        schema: str | None = None,
+    ) -> list[ColumnInfo]:
         """Return column metadata for the specified table."""
 
     @abc.abstractmethod
     async def get_indexes(
         self,
         table_name: str,
-        database: Optional[str] = None,
-        schema: Optional[str] = None,
-    ) -> List[IndexInfo]:
+        database: str | None = None,
+        schema: str | None = None,
+    ) -> list[IndexInfo]:
         """Return index metadata for the specified table."""
 
     # ------------------------------------------------------------------ #
@@ -184,9 +184,9 @@ class AbstractBaseAdapter(abc.ABC):
     async def execute_query(
         self,
         sql: str,
-        parameters: Optional[Dict[str, Any]] = None,
-        max_rows: Optional[int] = None,
-    ) -> List[Dict[str, Any]]:
+        parameters: dict[str, Any] | None = None,
+        max_rows: int | None = None,
+    ) -> list[dict[str, Any]]:
         """
         Execute a read-only SQL query and return the result set as a list
         of dicts.
@@ -218,8 +218,8 @@ class AbstractBaseAdapter(abc.ABC):
     async def get_create_table_sql(
         self,
         table_name: str,
-        database: Optional[str] = None,
-        schema: Optional[str] = None,
+        database: str | None = None,
+        schema: str | None = None,
     ) -> str:
         """
         Return the ``CREATE TABLE`` DDL that would reproduce the table's
@@ -233,8 +233,8 @@ class AbstractBaseAdapter(abc.ABC):
     async def get_table_ddl(
         self,
         table_name: str,
-        database: Optional[str] = None,
-        schema: Optional[str] = None,
+        database: str | None = None,
+        schema: str | None = None,
     ) -> str:
         """
         Alias / convenience wrapper around :meth:`get_create_table_sql`.
@@ -251,8 +251,8 @@ class AbstractBaseAdapter(abc.ABC):
     async def get_table_stats(
         self,
         table_name: str,
-        database: Optional[str] = None,
-        schema: Optional[str] = None,
+        database: str | None = None,
+        schema: str | None = None,
     ) -> TableStats:
         """
         Return live or cached statistics for a table (row count, size, ...).
@@ -262,11 +262,11 @@ class AbstractBaseAdapter(abc.ABC):
     # Utility helpers (concrete — may be overridden)
     # ------------------------------------------------------------------ #
 
-    def _default_database(self, database: Optional[str] = None) -> str:
+    def _default_database(self, database: str | None = None) -> str:
         """Resolve the effective database name."""
         return database or self.config.database or ""
 
-    def _default_schema(self, schema: Optional[str] = None) -> str:
+    def _default_schema(self, schema: str | None = None) -> str:
         """Resolve the effective schema name."""
         return schema or self.config.schema_name or ""
 

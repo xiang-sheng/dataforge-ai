@@ -7,20 +7,20 @@ model review, partitioning advice, and general modelling suggestions.
 
 from __future__ import annotations
 
-from enum import Enum
-from typing import Any, Optional
+from enum import StrEnum
+from typing import Any
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
-from src.api.deps import get_ai_provider, get_connection_manager
+from src.api.deps import get_ai_provider
 
 # ---------------------------------------------------------------------------
 # Enums
 # ---------------------------------------------------------------------------
 
 
-class ModelingType(str, Enum):
+class ModelingType(StrEnum):
     """Supported modelling paradigms."""
 
     DIMENSIONAL = "dimensional"
@@ -29,7 +29,7 @@ class ModelingType(str, Enum):
     ACTIVITY_SCHEMA = "activity_schema"
 
 
-class ReviewSeverity(str, Enum):
+class ReviewSeverity(StrEnum):
     """Severity level for model review findings."""
 
     INFO = "info"
@@ -50,17 +50,17 @@ class TableSchemaInput(BaseModel):
     columns: list[dict[str, Any]] = Field(..., description="List of column definitions with name, data_type, nullable, etc.")
     primary_keys: list[str] = Field(default_factory=list, description="Primary key column names.")
     foreign_keys: list[dict[str, str]] = Field(default_factory=list, description="Foreign key relationships: column, ref_table, ref_column.")
-    sample_row_count: Optional[int] = Field(None, description="Approximate row count for sizing context.")
-    comment: Optional[str] = Field(None, description="Table-level documentation or description.")
+    sample_row_count: int | None = Field(None, description="Approximate row count for sizing context.")
+    comment: str | None = Field(None, description="Table-level documentation or description.")
 
 
 class ModelingSuggestRequest(BaseModel):
     """Request for AI modelling suggestions."""
 
     tables: list[TableSchemaInput] = Field(..., min_length=1, description="Source tables to analyse.")
-    business_context: Optional[str] = Field(None, description="Natural-language description of the business domain.")
+    business_context: str | None = Field(None, description="Natural-language description of the business domain.")
     modeling_type: ModelingType = Field(ModelingType.DIMENSIONAL, description="Preferred modelling paradigm.")
-    target_platform: Optional[str] = Field(None, description="Target platform (e.g. 'ClickHouse', 'Snowflake').")
+    target_platform: str | None = Field(None, description="Target platform (e.g. 'ClickHouse', 'Snowflake').")
 
 
 class ModelingSuggestion(BaseModel):
@@ -85,9 +85,9 @@ class DimensionalModelRequest(BaseModel):
 
     tables: list[TableSchemaInput] = Field(..., min_length=1, description="Source tables.")
     business_process: str = Field(..., description="The business process being modelled (e.g. 'order fulfilment').")
-    grain: Optional[str] = Field(None, description="Desired grain of the fact table (e.g. 'one row per order line').")
+    grain: str | None = Field(None, description="Desired grain of the fact table (e.g. 'one row per order line').")
     preferred_schema: str = Field("star", description="Schema type: 'star' or 'snowflake'.")
-    target_platform: Optional[str] = Field(None, description="Target warehouse platform.")
+    target_platform: str | None = Field(None, description="Target warehouse platform.")
 
 
 class FactTable(BaseModel):
@@ -122,8 +122,8 @@ class ModelReviewRequest(BaseModel):
     """Request to review an existing data model."""
 
     tables: list[TableSchemaInput] = Field(..., min_length=1, description="Tables to review.")
-    warehouse_layer: Optional[str] = Field(None, description="Warehouse layer context (e.g. 'dwd', 'dws').")
-    standards: Optional[str] = Field(None, description="Team-specific modelling standards to check against.")
+    warehouse_layer: str | None = Field(None, description="Warehouse layer context (e.g. 'dwd', 'dws').")
+    standards: str | None = Field(None, description="Team-specific modelling standards to check against.")
 
 
 class ReviewFinding(BaseModel):
@@ -132,7 +132,7 @@ class ReviewFinding(BaseModel):
     severity: ReviewSeverity
     table: str
     message: str
-    recommendation: Optional[str] = None
+    recommendation: str | None = None
 
 
 class ModelReviewResponse(BaseModel):
@@ -150,7 +150,7 @@ class PartitionAdviceRequest(BaseModel):
     columns: list[dict[str, Any]] = Field(..., description="Column definitions.")
     row_count: int = Field(..., gt=0, description="Approximate total row count.")
     query_patterns: list[str] = Field(default_factory=list, description="Common query WHERE clauses or patterns.")
-    target_platform: Optional[str] = Field(None, description="Target platform (e.g. 'ClickHouse').")
+    target_platform: str | None = Field(None, description="Target platform (e.g. 'ClickHouse').")
 
 
 class PartitionAdviceResponse(BaseModel):
@@ -159,9 +159,9 @@ class PartitionAdviceResponse(BaseModel):
     recommended_partition_keys: list[str] = Field(default_factory=list)
     sort_keys: list[str] = Field(default_factory=list)
     rationale: str = ""
-    estimated_partition_count: Optional[int] = None
+    estimated_partition_count: int | None = None
     warnings: list[str] = Field(default_factory=list)
-    ddl_snippet: Optional[str] = None
+    ddl_snippet: str | None = None
 
 
 # ---------------------------------------------------------------------------

@@ -1,19 +1,15 @@
 """Tests for src.agents — multi-agent management layer."""
 
-import os
-import tempfile
+from typing import ClassVar
 from unittest.mock import MagicMock
 
-import duckdb
 import pytest
-
 from src.agents.base import AgentResult, ManagedAgent
+from src.agents.ddl_wrapper import DDLAgentWrapper
+from src.agents.orchestrator import AgentOrchestrator
 from src.agents.registry import AgentRegistry
 from src.agents.router import IntentRouter
-from src.agents.orchestrator import AgentOrchestrator
 from src.agents.sql_wrapper import SQLAgentWrapper
-from src.agents.ddl_wrapper import DDLAgentWrapper
-
 
 # ===================================================================
 #  Test helpers
@@ -25,7 +21,7 @@ class MockAgent(ManagedAgent):
 
     name = "mock_agent"
     description = "测试用 Mock Agent"
-    intent_keywords = ["测试", "mock", "echo"]
+    intent_keywords: ClassVar[list[str]] = ["测试", "mock", "echo"]
 
     def process(self, message: str, context: dict | None = None) -> AgentResult:
         return AgentResult(
@@ -41,7 +37,7 @@ class FailingAgent(ManagedAgent):
 
     name = "failing_agent"
     description = "总是失败的 Agent"
-    intent_keywords = ["失败", "error"]
+    intent_keywords: ClassVar[list[str]] = ["失败", "error"]
 
     def process(self, message: str, context: dict | None = None) -> AgentResult:
         raise RuntimeError("Intentional test error")
@@ -52,7 +48,7 @@ class SecondAgent(ManagedAgent):
 
     name = "second_agent"
     description = "第二个测试 Agent"
-    intent_keywords = ["第二", "another", "build"]
+    intent_keywords: ClassVar[list[str]] = ["第二", "another", "build"]
 
     def process(self, message: str, context: dict | None = None) -> AgentResult:
         return AgentResult(
@@ -295,7 +291,7 @@ class TestAgentOrchestrator:
 
 class TestDDLParseMessage:
     def test_extract_layer_dws(self):
-        source, layer, desc = DDLAgentWrapper._parse_message(
+        source, layer, _desc = DDLAgentWrapper._parse_message(
             "请为 order_items 源表生成 DWS 层的目标表 DDL", None
         )
         assert layer == "DWS"
@@ -309,7 +305,7 @@ class TestDDLParseMessage:
         assert source == "users"
 
     def test_extract_layer_dwd(self):
-        source, layer, _ = DDLAgentWrapper._parse_message(
+        _source, layer, _ = DDLAgentWrapper._parse_message(
             "帮我把 orders 表建 DWD 层的目标表", None
         )
         assert layer == "DWD"
@@ -353,7 +349,7 @@ class TestSQLAgentWrapper:
 
     def test_process_with_mock(self):
         """Test that the wrapper correctly calls SQLAgent and formats result."""
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import MagicMock, patch
 
         mock_llm = MagicMock()
         mock_db = MagicMock()
@@ -368,8 +364,8 @@ class TestSQLAgentWrapper:
         mock_analysis.reasoning = "需要统计订单总数"
         mock_analysis.tool_calls_log = [{"step": 1, "tool": "list_tables", "args": {}}]
 
-        with patch("src.warehouse.sql_agent.SQLAgent") as MockSQLAgent:
-            instance = MockSQLAgent.return_value
+        with patch("src.warehouse.sql_agent.SQLAgent") as mock_sql_agent:
+            instance = mock_sql_agent.return_value
             instance.analyze.return_value = mock_analysis
 
             result = wrapper.process("test question")
@@ -389,7 +385,7 @@ class TestDDLAgentWrapper:
         assert "DWS" in w.intent_keywords
 
     def test_process_with_mock(self):
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import MagicMock, patch
 
         mock_llm = MagicMock()
         mock_db = MagicMock()
@@ -404,8 +400,8 @@ class TestDDLAgentWrapper:
         mock_ddl_result.verification = "OK"
         mock_ddl_result.tool_calls_log = []
 
-        with patch("src.warehouse.ddl_agent.DDLAgent") as MockDDLAgent:
-            instance = MockDDLAgent.return_value
+        with patch("src.warehouse.ddl_agent.DDLAgent") as mock_ddl_agent:
+            instance = mock_ddl_agent.return_value
             instance.build.return_value = mock_ddl_result
 
             result = wrapper.process(
@@ -427,7 +423,7 @@ class TestDDLAgentWrapper:
 class TestOrchestratorEndToEnd:
     def test_full_flow_with_mock_agents(self):
         """Test the complete flow: registry → router → orchestrator."""
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import MagicMock
 
         mock_llm = MagicMock()
 
@@ -478,8 +474,9 @@ class TestGovernanceAgentWrapper:
 
     def test_process_with_mock(self):
         """Test that governance wrapper runs BaseAgent and returns result."""
-        from src.agents.governance_wrapper import GovernanceAgentWrapper
         from unittest.mock import patch
+
+        from src.agents.governance_wrapper import GovernanceAgentWrapper
 
         mock_llm = MagicMock()
         mock_db = MagicMock()
