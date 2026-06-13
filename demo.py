@@ -20,8 +20,8 @@ DataForge AI - 多 Agent 智能数据分析演示
 
 from __future__ import annotations
 
-import sys
 import os
+import sys
 import tempfile
 from pathlib import Path
 
@@ -29,11 +29,11 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-import duckdb
+import duckdb  # noqa: E402, I001
 
 
 # ===================================================================
-#  模拟业务数据库（电商场景）
+#  模拟业务数据库(电商场景)
 # ===================================================================
 
 INIT_SQL = """
@@ -160,7 +160,7 @@ def create_demo_db() -> duckdb.DuckDBPyConnection:
 
 
 # ===================================================================
-#  演示对话（混合意图：问数 + 建表）
+#  演示对话(混合意图: 问数 + 建表)
 # ===================================================================
 
 DEMO_CONVERSATIONS = [
@@ -250,11 +250,11 @@ def main():
     print_section("Step 3: 初始化多 Agent 编排器")
 
     from src.agents import (
-        AgentRegistry,
         AgentOrchestrator,
-        SQLAgentWrapper,
+        AgentRegistry,
         DDLAgentWrapper,
         GovernanceAgentWrapper,
+        SQLAgentWrapper,
     )
 
     convention_file = str(PROJECT_ROOT / "conventions" / "default_convention.yaml")
@@ -279,7 +279,7 @@ def main():
         print(f"        关键词: {info['keywords']}")
 
     # ------------------------------------------------------------------
-    #  Step 4: 通过统一入口交互（自动意图路由）
+    #  Step 4: 通过统一入口交互(自动意图路由)
     # ------------------------------------------------------------------
     results = []
 
@@ -327,9 +327,9 @@ def main():
         print()
 
     # ------------------------------------------------------------------
-    #  Step 5: 显式指定 Agent（跳过意图分类）
+    #  Step 5: 显式指定 Agent(跳过意图分类)
     # ------------------------------------------------------------------
-    print_section("Step 5: 显式指定 Agent（跳过意图分类）")
+    print_section("Step 5: 显式指定 Agent(跳过意图分类)")
     print("    使用 target_agent 参数直接路由，无需 LLM 分类")
     print()
 
@@ -339,8 +339,8 @@ def main():
         context={"db": conn, "convention_file": convention_file},
     )
 
-    print(f"    用户: 查2025年5月所有订单的总金额")
-    print(f"    → 指定 Agent: sql_query（跳过分类）")
+    print("    用户: 查2025年5月所有订单的总金额")
+    print("    → 指定 Agent: sql_query(跳过分类)")
     print(f"    → 状态: {'成功' if explicit_result.success else '失败'}")
     if explicit_result.content:
         lines = explicit_result.content.splitlines()
