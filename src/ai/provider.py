@@ -241,16 +241,17 @@ class RateLimiter:
                     current_tpm = sum(t for _, t in self._token_records)
                 self._token_records.append((time.monotonic(), estimated_tokens))
 
-    def record_usage(self, tokens_used: int) -> None:
+    async def record_usage(self, tokens_used: int) -> None:
         """Record actual token consumption after a request completes.
 
-        This is a fire-and-forget synchronous call; the records are consumed by
-        the next ``acquire`` check.
+        Acquires the rate-limiter lock to ensure thread-safe updates to the
+        shared ``_token_records`` list (which is also read by :meth:`acquire`).
 
         Args:
             tokens_used: The actual number of tokens consumed.
         """
-        self._token_records.append((time.monotonic(), tokens_used))
+        async with self._lock:
+            self._token_records.append((time.monotonic(), tokens_used))
 
 
 # ---------------------------------------------------------------------------
@@ -518,7 +519,8 @@ class BaseAIProvider(ABC):
             Exception: The last exception if all retries are exhausted.
         """
         last_exc: Exception | None = None
-        for attempt in range(1, self._config.max_retries + 1):
+        max_attempts = self._config.max_retries + 1  # 1 initial + N retries
+        for attempt in range(1, max_attempts + 1):
             try:
                 return await fn(*args, **kwargs)
             except Exception as exc:
@@ -527,7 +529,7 @@ class BaseAIProvider(ABC):
                 logger.warning(
                     "Provider call failed (attempt %d/%d): %s  -- retrying in %.1fs",
                     attempt,
-                    self._config.max_retries,
+                    max_attempts,
                     exc,
                     delay,
                 )
@@ -900,7 +902,7 @@ class LangChainProvider(BaseAIProvider):
             ai_message: AIMessage = await model.ainvoke(lc_messages)
             usage = self._extract_usage_from_ai_message(ai_message)
             self._record_usage(usage)
-            self._rate_limiter.record_usage(usage.total_tokens)
+            await self._rate_limiter.record_usage(usage.total_tokens)
             return AIResponse(
                 content=ai_message.content or "",
                 model=self._config.model,
@@ -935,7 +937,7 @@ class LangChainProvider(BaseAIProvider):
             ai_message: AIMessage = await model.ainvoke(lc_messages)
             usage = self._extract_usage_from_ai_message(ai_message)
             self._record_usage(usage)
-            self._rate_limiter.record_usage(usage.total_tokens)
+            await self._rate_limiter.record_usage(usage.total_tokens)
             return AIResponse(
                 content=ai_message.content or "",
                 model=self._config.model,

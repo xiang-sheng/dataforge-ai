@@ -11,7 +11,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import TYPE_CHECKING
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 if TYPE_CHECKING:
@@ -344,6 +344,26 @@ class AppSettings(BaseSettings):
         if isinstance(v, str):
             return [origin.strip() for origin in v.split(",") if origin.strip()]
         return v
+
+    @model_validator(mode="after")
+    def _validate_cors_credentials(self):
+        """Reject wildcard origins when credentials are enabled.
+
+        Browsers refuse ``Access-Control-Allow-Credentials: true`` combined
+        with ``Access-Control-Allow-Origin: *``, but the error only surfaces
+        at request time.  Catching it here makes the misconfiguration obvious
+        at startup.
+        """
+        if self.cors_allow_credentials and self.cors_origins == ["*"]:
+            import warnings
+
+            warnings.warn(
+                "cors_origins=['*'] with cors_allow_credentials=True is insecure "
+                "and will be rejected by browsers. "
+                "Either set cors_allow_credentials=False or specify explicit origins.",
+                stacklevel=2,
+            )
+        return self
 
     # ------------------------------------------------------------------ #
     # Bridge to AI provider layer
