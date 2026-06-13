@@ -124,10 +124,6 @@ class SchemaEmbedder:
         # Cosine similarity matrix
         sim_matrix = normalized @ normalized.T
 
-        # Build schema lookup
-        {s.table_name: s for s in schemas}
-        [s.table_name for s in schemas]
-
         # Extract upper triangle pairs, filter by threshold
         candidates: list[CandidatePair] = []
         for i, j in combinations(range(len(schemas)), 2):

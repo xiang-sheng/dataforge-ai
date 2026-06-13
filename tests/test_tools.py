@@ -164,7 +164,7 @@ class TestExecuteDDL:
 
     def test_bad_ddl(self, setup_db):
         result = execute_ddl.invoke({"ddl": "THIS IS NOT SQL"})
-        assert "FAIL" in result
+        assert "BLOCKED" in result or "FAIL" in result
 
 
 # --- create_table_from_query ---

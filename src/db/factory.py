@@ -189,9 +189,10 @@ class AdapterFactory:
 
         adapter_class = cls._registry.get(db_type_lower)
         if adapter_class is None:
-            ", ".join(sorted(cls._registry.keys()))
+            available = ", ".join(sorted(cls._registry.keys()))
             raise ConnectionError(
-                message=f"No adapter registered for database type '{db_type}'.",
+                message=f"No adapter registered for database type '{db_type}'. "
+                        f"Available types: {available}",
                 code="UNSUPPORTED_DB_TYPE",
                 details={
                     "requested_type": db_type,

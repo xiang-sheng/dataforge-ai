@@ -13,10 +13,10 @@ from typing import TYPE_CHECKING
 from fastapi import Depends, HTTPException, status
 
 if TYPE_CHECKING:
+    from src.ai.provider import BaseAIProvider
     from src.config.settings import AppSettings
-    from src.core.ai_provider import AIProvider
-    from src.core.connection import ConnectionManager
-    from src.db.adapters.base import BaseAdapter
+    from src.core.database import ConnectionManager
+    from src.db.base import AbstractBaseAdapter
 
 
 # ---------------------------------------------------------------------------
@@ -33,28 +33,30 @@ def get_settings() -> AppSettings:
     Returns:
         AppSettings: The application configuration object.
     """
-    from src.config.settings import AppSettings
+    from src.config.settings import get_settings as _get_settings
 
-    return AppSettings()
+    return _get_settings()
 
 
 # ---------------------------------------------------------------------------
 # Connection Manager
 # ---------------------------------------------------------------------------
 
-@lru_cache
 def get_connection_manager() -> ConnectionManager:
-    """Return the cached connection-manager singleton.
+    """Return the application-wide ConnectionManager singleton.
 
-    The connection manager is responsible for maintaining the registry of
-    database connections and their lifecycle.
+    Delegates to ``src.main.get_connection_manager()`` which is initialised
+    during the application lifespan with the correct ``AppSettings``.
 
     Returns:
         ConnectionManager: The global connection manager instance.
-    """
-    from src.core.connection import ConnectionManager
 
-    return ConnectionManager()
+    Raises:
+        RuntimeError: If called before the application lifespan has started.
+    """
+    from src.main import get_connection_manager as _get_cm
+
+    return _get_cm()
 
 
 # ---------------------------------------------------------------------------
@@ -62,18 +64,18 @@ def get_connection_manager() -> ConnectionManager:
 # ---------------------------------------------------------------------------
 
 @lru_cache
-def get_ai_provider() -> AIProvider:
+def get_ai_provider() -> BaseAIProvider:
     """Return the cached AI-provider singleton.
 
     The AI provider wraps the underlying LLM backend and exposes a uniform
     interface for SQL generation, modeling suggestions, and code explanation.
 
     Returns:
-        AIProvider: The global AI provider instance.
+        BaseAIProvider: The global AI provider instance.
     """
-    from src.core.ai_provider import AIProvider
+    settings = get_settings()
 
-    return AIProvider()
+    return settings.get_ai_provider()
 
 
 # ---------------------------------------------------------------------------
@@ -83,7 +85,7 @@ def get_ai_provider() -> AIProvider:
 async def get_db_adapter(
     connection_id: str,
     manager: ConnectionManager = Depends(get_connection_manager),
-) -> BaseAdapter:
+) -> AbstractBaseAdapter:
     """Resolve and return a live database adapter for the given *connection_id*.
 
     This dependency validates that the requested connection exists and that it
@@ -98,7 +100,7 @@ async def get_db_adapter(
         HTTPException(502): If the connection cannot be established.
 
     Returns:
-        BaseAdapter: A ready-to-use database adapter.
+        AbstractBaseAdapter: A ready-to-use database adapter.
     """
     connection = await manager.get(connection_id)
 

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, Trash2, RefreshCw, CheckCircle, XCircle, Loader2 } from 'lucide-react';
+import { Plus, Trash2, RefreshCw, CheckCircle, XCircle, Loader2, Database } from 'lucide-react';
 import { api } from '../api';
 
 const DB_TYPES = ['postgresql', 'mysql', 'clickhouse', 'snowflake', 'bigquery', 'redshift', 'doris', 'starrocks'];
@@ -16,11 +16,17 @@ export default function Connections() {
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [testResult, setTestResult] = useState(null);
   const [testing, setTesting] = useState(null);
+  const [error, setError] = useState(null);
 
   const load = async () => {
     setLoading(true);
-    try { setConnections(await api.listConnections({})); }
-    catch { setConnections([]); }
+    setError(null);
+    try {
+      setConnections(await api.listConnections({}));
+    } catch (e) {
+      setConnections([]);
+      setError('Failed to load connections');
+    }
     setLoading(false);
   };
 
@@ -84,6 +90,12 @@ export default function Connections() {
             <button type="submit" className="px-4 py-2 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">创建</button>
           </div>
         </form>
+      )}
+
+      {error && (
+        <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-xl p-4 mb-5">
+          {error}
+        </div>
       )}
 
       {loading ? (

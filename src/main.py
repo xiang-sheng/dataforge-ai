@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 import time
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import redis.asyncio as aioredis
@@ -266,11 +267,48 @@ async def health_check() -> dict:
 app.include_router(api_router)
 
 # ------------------------------------------------------------------ #
+# Frontend static files (SPA)
+# ------------------------------------------------------------------ #
+
+_frontend_dist = Path(__file__).resolve().parent.parent / "frontend" / "dist"
+
+if _frontend_dist.is_dir():
+    from fastapi.responses import FileResponse
+    from fastapi.staticfiles import StaticFiles
+
+    # Mount static assets (JS/CSS/images)
+    app.mount(
+        "/assets",
+        StaticFiles(directory=str(_frontend_dist / "assets")),
+        name="frontend-assets",
+    )
+
+    # Catch-all route for SPA client-side routing
+    @app.get("/{full_path:path}", tags=["Frontend"], include_in_schema=False)
+    async def serve_frontend(full_path: str) -> FileResponse:
+        """Serve the frontend SPA — all non-API routes return index.html."""
+        # If the requested file exists in dist, serve it directly
+        file_path = _frontend_dist / full_path
+        if full_path and file_path.is_file():
+            return FileResponse(str(file_path))
+        # Otherwise, fall back to index.html for client-side routing
+        return FileResponse(str(_frontend_dist / "index.html"))
+
+    logger.info("Frontend static files mounted from %s", _frontend_dist)
+else:
+    logger.info(
+        "Frontend dist not found at %s — run 'npm run build' in frontend/ to enable.",
+        _frontend_dist,
+    )
+
+# ------------------------------------------------------------------ #
 # Root endpoint
 # ------------------------------------------------------------------ #
 
 @app.get("/", tags=["System"], include_in_schema=False)
 async def root() -> dict:
+    if _frontend_dist.is_dir():
+        return FileResponse(str(_frontend_dist / "index.html"))
     return {
         "name": "DataForge AI",
         "version": __version__,

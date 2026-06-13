@@ -37,6 +37,48 @@ from src.warehouse.ddl_auto_builder import (
 
 logger = logging.getLogger(__name__)
 
+# Allowed extensions for convention files to prevent arbitrary file reads
+_SAFE_CONVENTION_EXTENSIONS = frozenset({".yaml", ".yml", ".json", ".toml"})
+
+
+def _validate_convention_path(raw_path: str) -> Path:
+    """Validate and resolve a convention file path.
+
+    Prevents path traversal attacks by:
+    1. Resolving to an absolute path (following symlinks).
+    2. Rejecting paths with ``..`` components.
+    3. Allowing only known safe file extensions.
+
+    Raises:
+        HTTPException(400): If the path fails validation.
+        HTTPException(404): If the resolved path is not a file.
+    """
+    if ".." in raw_path:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Convention path must not contain '..' components.",
+        )
+
+    resolved = Path(raw_path).resolve()
+
+    if resolved.suffix.lower() not in _SAFE_CONVENTION_EXTENSIONS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Convention file must have one of these extensions: "
+                f"{', '.join(sorted(_SAFE_CONVENTION_EXTENSIONS))}. "
+                f"Got: '{resolved.suffix or '(none)'}'."
+            ),
+        )
+
+    if not resolved.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Convention file not found: '{raw_path}'.",
+        )
+
+    return resolved
+
 
 # ---------------------------------------------------------------------------
 # Enums (re-exported as plain strings for flexibility)
@@ -281,7 +323,7 @@ async def build_ddl(payload: DDLBuildRequest) -> DDLPipelineResult:
         source_tables=payload.source_tables,
         target_layer=target_layer_upper,
         target_db_type=target_db_lower,
-        convention_path=payload.convention_path,
+        convention_path=str(_validate_convention_path(payload.convention_path)) if payload.convention_path else None,
         include_computation_sql=payload.include_computation_sql,
         local_verify=payload.local_verify,
         sample_rows_for_verify=payload.sample_rows_for_verify,
@@ -508,15 +550,11 @@ async def validate_convention(
     errors: list[str] = []
     warnings: list[str] = []
 
-    convention_path = payload.convention_path
-    if not Path(convention_path).is_file():
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Convention file not found: '{convention_path}'.",
-        )
+    convention_path = _validate_convention_path(payload.convention_path)
+    convention_path_str = str(convention_path)
 
     try:
-        convention = loader.load_auto(convention_path)
+        convention = loader.load_auto(convention_path_str)
     except Exception as exc:
         return ConventionValidateResponse(
             is_valid=False,
@@ -761,17 +799,13 @@ async def check_table_against_convention(
     payload: ConventionCheckTableRequest,
 ) -> ConventionCheckTableResponse:
     """Check a table schema against a convention file."""
-    convention_path = payload.convention_path
-    if not Path(convention_path).is_file():
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Convention file not found: '{convention_path}'.",
-        )
+    convention_path = _validate_convention_path(payload.convention_path)
+    convention_path_str = str(convention_path)
 
     # Load the convention
     loader = ConventionLoader()
     try:
-        convention = loader.load_auto(convention_path)
+        convention = loader.load_auto(convention_path_str)
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,

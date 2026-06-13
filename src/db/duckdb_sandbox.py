@@ -1474,6 +1474,10 @@ class DuckDBSandbox:
         """
         assert self._conn is not None
 
+        # Validate table_name to prevent SQL injection — only allow safe identifiers
+        if not re.match(r'^[A-Za-z_][A-Za-z0-9_]*$', table_name):
+            return 0
+
         try:
             result = self._conn.execute(
                 "SELECT SUM(block_size * number_of_blocks) AS total_bytes "

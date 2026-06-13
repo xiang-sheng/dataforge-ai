@@ -2,12 +2,53 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
+from functools import lru_cache
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 router = APIRouter()
+
+# Directories that db_path must never write to
+_BLOCKED_DB_DIRS = ("/etc", "/usr", "/bin", "/sbin", "/boot", "/proc", "/sys", "/dev")
+# On Windows these translate to system roots like C:\Windows, C:\Program Files
+if os.name == "nt":
+    _BLOCKED_DB_DIRS = (
+        os.environ.get("SYSTEMROOT", r"C:\Windows").lower(),
+        os.environ.get("PROGRAMFILES", r"C:\Program Files").lower(),
+        os.environ.get("PROGRAMFILES(X86)", r"C:\Program Files (x86)").lower(),
+    )
+
+
+def _validate_db_path(raw_path: str) -> str:
+    """Validate a DuckDB file path to prevent writing to sensitive directories.
+
+    Allows ``:memory:`` and paths that resolve outside system directories.
+    Raises HTTPException(400) for blocked paths.
+    """
+    if raw_path == ":memory:" or not raw_path:
+        return raw_path or ":memory:"
+
+    if ".." in raw_path:
+        raise HTTPException(
+            status_code=400,
+            detail="db_path must not contain '..' components.",
+        )
+
+    resolved = Path(raw_path).resolve()
+    resolved_lower = str(resolved).lower()
+
+    for blocked in _BLOCKED_DB_DIRS:
+        if blocked and resolved_lower.startswith(blocked.lower()):
+            raise HTTPException(
+                status_code=400,
+                detail=f"db_path must not point to a system directory: '{raw_path}'.",
+            )
+
+    return str(resolved)
 
 
 # ---------------------------------------------------------------------------
@@ -91,6 +132,7 @@ def _create_ll():
         )
 
 
+@lru_cache(maxsize=8)
 def _create_orchestrator(db_path: str = ":memory:", convention_file: str | None = None):
     """Create a fully configured AgentOrchestrator with all agents registered."""
     from src.agents import (
@@ -127,17 +169,19 @@ async def unified_chat(req: ChatRequest):
     也可通过 target_agent 参数直接指定 Agent。
     """
     try:
-        db = req.db_path or ":memory:"
+        db = _validate_db_path(req.db_path or ":memory:")
         orch = _create_orchestrator(db, req.convention_file)
 
         ctx = req.context or {}
         if req.convention_file:
             ctx["convention_file"] = req.convention_file
 
-        result = orch.chat(
-            message=req.message,
-            target_agent=req.target_agent,
-            context=ctx,
+        result = await asyncio.to_thread(
+            lambda: orch.chat(
+                message=req.message,
+                target_agent=req.target_agent,
+                context=ctx,
+            )
         )
 
         return ChatResponse(
@@ -156,7 +200,7 @@ async def list_agents():
     """列出所有已注册的 Agent 及其描述。"""
     try:
         orch = _create_orchestrator()
-        agents = orch.list_agents()
+        agents = await asyncio.to_thread(orch.list_agents)
         return [AgentInfo(**a) for a in agents]
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
@@ -172,7 +216,7 @@ async def analyze_question(req: AnalyzeRequest):
     try:
         from src.warehouse.sql_agent import SQLAgent
 
-        db = req.db_path or ":memory:"
+        db = _validate_db_path(req.db_path or ":memory:")
         llm = _create_ll()
 
         agent = SQLAgent(
@@ -181,7 +225,7 @@ async def analyze_question(req: AnalyzeRequest):
             convention_file=req.convention_file,
         )
 
-        result = agent.analyze(req.question)
+        result = await asyncio.to_thread(agent.analyze, req.question)
 
         return AnalyzeResponse(
             success=result.success,
@@ -201,7 +245,7 @@ async def build_ddl(req: BuildDDLRequest):
     try:
         from src.warehouse.ddl_agent import DDLAgent
 
-        db = req.db_path or ":memory:"
+        db = _validate_db_path(req.db_path or ":memory:")
         llm = _create_ll()
 
         agent = DDLAgent(
@@ -210,10 +254,12 @@ async def build_ddl(req: BuildDDLRequest):
             convention_file=req.convention_file,
         )
 
-        result = agent.build(
-            source_table=req.source_table,
-            target_layer=req.target_layer,
-            business_desc=req.business_desc,
+        result = await asyncio.to_thread(
+            lambda: agent.build(
+                source_table=req.source_table,
+                target_layer=req.target_layer,
+                business_desc=req.business_desc,
+            )
         )
 
         return BuildDDLResponse(

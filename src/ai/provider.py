@@ -273,7 +273,6 @@ class TokenUsageCallbackHandler(BaseCallbackHandler):
         super().__init__()
         self.total_usage = TokenUsage()
         self.last_usage = TokenUsage()
-        self._lock = asyncio.Lock()
 
     # -- Synchronous callbacks ------------------------------------------------
 

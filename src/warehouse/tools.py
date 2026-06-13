@@ -269,10 +269,21 @@ def execute_ddl(ddl: str) -> str:
     """执行 DDL 语句（CREATE TABLE / DROP TABLE / CREATE VIEW 等）。
 
     用于创建持久化的表或视图。多条语句用分号分隔。
+    仅允许以下操作类型：CREATE TABLE, CREATE VIEW, CREATE INDEX,
+    CREATE SEQUENCE, DROP TABLE, DROP VIEW, DROP INDEX, ALTER TABLE。
 
     Args:
         ddl: DDL 语句
     """
+    # Allowlist of permitted DDL operation prefixes (checked after uppercasing)
+    allowed_ddl_prefixes = (
+        "CREATE TABLE", "CREATE VIEW", "CREATE INDEX", "CREATE SEQUENCE",
+        "CREATE SCHEMA", "CREATE OR REPLACE VIEW", "CREATE OR REPLACE TABLE",
+        "DROP TABLE", "DROP VIEW", "DROP INDEX", "DROP SCHEMA",
+        "ALTER TABLE", "ALTER VIEW",
+        "COMMENT ON",
+    )
+
     try:
         conn = get_conn()
         stmts = [s.strip() for s in ddl.split(";") if s.strip()]
@@ -281,6 +292,14 @@ def execute_ddl(ddl: str) -> str:
         for i, stmt in enumerate(stmts, 1):
             upper = stmt.upper()
             if upper.startswith("--") or not upper:
+                continue
+
+            # Enforce DDL allowlist — reject non-DDL or dangerous operations
+            if not any(upper.startswith(prefix) for prefix in allowed_ddl_prefixes):
+                results.append(
+                    f"[{i}] BLOCKED: 不允许的操作类型。"
+                    f"仅允许: {', '.join(' '.join(p.split()[:2]) for p in allowed_ddl_prefixes)}"
+                )
                 continue
 
             # For CREATE TABLE without IF NOT EXISTS, add it automatically
