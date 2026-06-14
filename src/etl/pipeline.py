@@ -8,12 +8,15 @@ tools (Apache Airflow and DolphinScheduler).
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
 from typing import Any
+
+from src.warehouse.lineage import LineageTracker
 
 logger = logging.getLogger(__name__)
 
@@ -1020,3 +1023,273 @@ class PipelineBuilder:
             StepType.NOTIFY: "HTTP",
         }
         return mapping.get(step_type, "PYTHON")
+
+
+# ---------------------------------------------------------------------------
+# PipelineExecutor
+# ---------------------------------------------------------------------------
+
+@dataclass
+class StepResult:
+    """Result of executing a single pipeline step.
+
+    Attributes:
+        step_id: The ID of the step that was executed.
+        status: Outcome status (``"SUCCESS"`` or ``"FAILED"``).
+        error: Optional error message when the step fails.
+    """
+
+    step_id: str
+    status: str
+    error: str | None = None
+
+
+class PipelineExecutor:
+    """Execute ETL pipelines and automatically collect data lineage.
+
+    Runs each step of a :class:`Pipeline` in dependency order.  After a
+    step completes successfully, lineage is extracted from its SQL
+    (``source_query`` parameter or ``SourceConfig.query`` / transform
+    expressions) and persisted via :class:`LineageTracker`.
+
+    Lineage collection is a **best-effort** operation: any failure during
+    parsing or persistence is logged but never blocks or fails the ETL
+    pipeline.
+
+    Args:
+        session_factory: An ``async_sessionmaker`` used by the lineage
+            tracker to persist lineage records.  When ``None``, lineage
+            collection is silently skipped.
+        dialect: SQL dialect hint passed to the lineage parser.
+
+    Usage::
+
+        executor = PipelineExecutor(session_factory, dialect="hive")
+        results = await executor.execute_pipeline(pipeline)
+    """
+
+    def __init__(
+        self,
+        session_factory: Any | None = None,
+        dialect: str = "mysql",
+    ) -> None:
+        self.session_factory = session_factory
+        self.dialect = dialect
+        self._background_tasks: set[asyncio.Task[Any]] = set()
+
+    # -- Public API ---------------------------------------------------------
+
+    async def execute_pipeline(self, pipeline: Pipeline) -> list[StepResult]:
+        """Execute all steps of a pipeline in dependency order.
+
+        Steps whose dependencies have not succeeded are skipped with a
+        ``FAILED`` result.  After each successful step, lineage collection
+        is attempted as a non-blocking best-effort operation.
+
+        Args:
+            pipeline: The pipeline to execute.
+
+        Returns:
+            A list of :class:`StepResult` objects, one per step.
+        """
+        results: dict[str, StepResult] = {}
+
+        for step in pipeline.steps:
+            # Wait until all dependencies have succeeded
+            deps_ok = all(
+                results.get(dep_id) is not None
+                and results[dep_id].status == "SUCCESS"
+                for dep_id in step.depends_on
+            )
+
+            if not deps_ok and step.depends_on:
+                results[step.step_id] = StepResult(
+                    step_id=step.step_id,
+                    status="FAILED",
+                    error="Dependency not met",
+                )
+                logger.warning(
+                    "Step '%s' skipped: dependency not met", step.name,
+                )
+                continue
+
+            try:
+                await self._execute_step(step)
+                result = StepResult(step_id=step.step_id, status="SUCCESS")
+                results[step.step_id] = result
+                logger.info("Step '%s' executed successfully", step.name)
+
+                # Best-effort lineage collection after successful execution
+                if self.session_factory is not None:
+                    task = asyncio.create_task(
+                        self._collect_lineage(step, self.session_factory)
+                    )
+                    self._background_tasks.add(task)
+                    task.add_done_callback(self._background_tasks.discard)
+
+            except Exception as exc:
+                results[step.step_id] = StepResult(
+                    step_id=step.step_id,
+                    status="FAILED",
+                    error=str(exc),
+                )
+                logger.error("Step '%s' failed: %s", step.name, exc)
+
+        return list(results.values())
+
+    # -- Internal helpers ---------------------------------------------------
+
+    async def _execute_step(self, step: PipelineStep) -> None:
+        """Execute a single pipeline step.
+
+        Dispatches to the appropriate handler based on :class:`StepType`.
+        Subclasses or future versions can override this to plug in real
+        database or compute engine calls.
+
+        Args:
+            step: The pipeline step to execute.
+
+        Raises:
+            NotImplementedError: If the step type is not supported.
+        """
+        if step.step_type == StepType.EXTRACT:
+            await self._run_extract(step)
+        elif step.step_type == StepType.TRANSFORM:
+            await self._run_transform(step)
+        elif step.step_type == StepType.LOAD:
+            await self._run_load(step)
+        elif step.step_type == StepType.VALIDATE:
+            await self._run_validate(step)
+        else:
+            logger.debug("Skipping step '%s' of type %s", step.name, step.step_type)
+
+    async def _run_extract(self, step: PipelineStep) -> None:
+        """Execute an extract step."""
+        cfg = step.source_config
+        if cfg is None:
+            raise ValueError(f"Extract step '{step.name}' has no source_config")
+        logger.debug(
+            "Extracting from %s (strategy=%s)",
+            cfg.source_table or cfg.query,
+            cfg.extract_strategy.value,
+        )
+        # Actual extraction would be performed by an external engine.
+
+    async def _run_transform(self, step: PipelineStep) -> None:
+        """Execute a transform step."""
+        if not step.transform_rules:
+            raise ValueError(f"Transform step '{step.name}' has no transform_rules")
+        logger.debug(
+            "Running %d transform rule(s) for step '%s'",
+            len(step.transform_rules),
+            step.name,
+        )
+
+    async def _run_load(self, step: PipelineStep) -> None:
+        """Execute a load step."""
+        cfg = step.target_config
+        if cfg is None:
+            raise ValueError(f"Load step '{step.name}' has no target_config")
+        logger.debug(
+            "Loading into %s (strategy=%s)",
+            cfg.target_table,
+            cfg.load_strategy.value,
+        )
+
+    async def _run_validate(self, step: PipelineStep) -> None:
+        """Execute a validation step."""
+        logger.debug(
+            "Running %d quality check(s) for step '%s'",
+            len(step.quality_checks),
+            step.name,
+        )
+
+    async def _collect_lineage(
+        self,
+        step: PipelineStep,
+        session_factory: Any,
+    ) -> None:
+        """Collect and persist lineage for a successfully executed step.
+
+        Extracts SQL from the step's ``source_query`` parameter (preferred)
+        or from its :class:`SourceConfig` / :class:`TransformRule`
+        expressions, parses it via :class:`LineageTracker`, and persists
+        the resulting :class:`LineageGraph`.
+
+        This is a best-effort operation -- any exception is caught and
+        logged so that lineage failures never break the ETL pipeline.
+
+        Args:
+            step: The pipeline step that was just executed.
+            session_factory: An ``async_sessionmaker`` for the internal DB.
+        """
+        try:
+            sql = self._extract_sql_from_step(step)
+            if not sql:
+                logger.debug(
+                    "No SQL found for step '%s'; skipping lineage collection",
+                    step.name,
+                )
+                return
+
+            tracker = LineageTracker()
+            graph = tracker.parse_sql_lineage(sql, dialect=self.dialect)
+
+            if not graph.table_edges:
+                logger.debug(
+                    "No lineage edges parsed for step '%s'; skipping persist",
+                    step.name,
+                )
+                return
+
+            await tracker.persist_lineage(graph, session_factory)
+            logger.info(
+                "Lineage collected for step '%s': %d table edge(s), "
+                "%d column edge(s)",
+                step.name,
+                len(graph.table_edges),
+                len(graph.column_edges),
+            )
+        except Exception as exc:
+            logger.warning(
+                "Failed to collect lineage for step '%s': %s",
+                step.name,
+                exc,
+            )
+
+    @staticmethod
+    def _extract_sql_from_step(step: PipelineStep) -> str | None:
+        """Extract the most relevant SQL string from a pipeline step.
+
+        Checks (in order):
+        1. ``step.parameters["source_query"]``
+        2. ``step.source_config.query``  (for extract steps)
+        3. SQL-type transform rule expressions joined by semicolons
+           (for transform steps)
+
+        Args:
+            step: The pipeline step to inspect.
+
+        Returns:
+            A SQL string, or ``None`` if no SQL could be found.
+        """
+        # 1. Explicit source_query in parameters
+        source_query = step.parameters.get("source_query")
+        if source_query:
+            return str(source_query)
+
+        # 2. SourceConfig.query on extract steps
+        if step.source_config and step.source_config.query:
+            return step.source_config.query
+
+        # 3. SQL transform rules on transform steps
+        if step.transform_rules:
+            sql_parts = [
+                rule.expression
+                for rule in step.transform_rules
+                if rule.transform_type == TransformType.SQL and rule.expression
+            ]
+            if sql_parts:
+                return ";\n".join(sql_parts)
+
+        return None

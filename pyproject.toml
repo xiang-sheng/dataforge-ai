@@ -54,6 +54,8 @@ dependencies = [
     "redis>=5.0.0,<6.0.0",
     # Embedding for data governance pre-filtering
     "sentence-transformers>=3.0.0,<6.0.0",
+    # SQL parsing & lineage extraction
+    "sqlglot>=23.0.0,<27.0.0",
 ]
 
 [project.optional-dependencies]

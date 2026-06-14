@@ -40,7 +40,7 @@ class ColumnLineage:
     transformation: str = "direct"
 
 
-@dataclass
+@dataclass(frozen=True)
 class TableLineage:
     """A table-level lineage edge.
 
@@ -158,7 +158,328 @@ class CycleInfo:
 
 
 # ---------------------------------------------------------------------------
-# SQL lineage parser
+# SQL lineage parser — sqlglot-based (precise)
+# ---------------------------------------------------------------------------
+
+class _SqlglotLineageParser:
+    """Precise SQL lineage parser using sqlglot.
+
+    Handles CTEs, subqueries, UNION, window functions, and complex
+    expressions that the regex-based parser cannot resolve.
+    """
+
+    @classmethod
+    def parse(cls, sql: str, dialect: str = "mysql") -> LineageGraph:
+        """Parse SQL and extract table + column lineage using sqlglot.
+
+        Args:
+            sql: The SQL statement to parse.
+            dialect: The SQL dialect (e.g. ``"mysql"``, ``"hive"``, ``"postgres"``).
+
+        Returns:
+            A ``LineageGraph`` with table and column-level lineage.
+        """
+        import sqlglot
+        from sqlglot import exp as sg_exp
+        from sqlglot.lineage import lineage as sg_lineage
+
+        graph = LineageGraph()
+
+        try:
+            ast = sqlglot.parse_one(sql, dialect=dialect)
+        except Exception as exc:
+            logger.debug("sqlglot parse_one failed: %s", exc)
+            return graph
+
+        # --- Detect target table -------------------------------------------
+        target_table: str | None = None
+        relationship = "INSERT INTO"
+
+        if isinstance(ast, sg_exp.Insert):
+            target_table = cls._extract_table_name(ast.this)
+            relationship = "INSERT INTO"
+        elif isinstance(ast, sg_exp.Create):
+            target_table = cls._extract_table_name(ast.this)
+            relationship = "CTAS"
+        elif isinstance(ast, sg_exp.Merge):
+            target_table = cls._extract_table_name(ast.this)
+            relationship = "MERGE"
+
+        if not target_table:
+            return graph
+
+        # --- Detect source tables ------------------------------------------
+        source_tables = cls._extract_source_tables(ast, target_table=target_table)
+
+        # Build CTE name -> CTE AST mapping for resolution
+        cte_map: dict[str, sg_exp.CTE] = {}
+        for cte in ast.find_all(sg_exp.CTE):
+            cte_alias = cte.alias
+            if cte_alias:
+                cte_map[cte_alias.upper()] = cte
+
+        # Filter out CTE names from source tables (they are intermediate)
+        real_source_tables: set[str] = set()
+        for src in source_tables:
+            if src.upper() not in cte_map:
+                real_source_tables.add(src)
+
+        # Add table-level edges
+        for src in real_source_tables:
+            graph.add_table_edge(src, target_table, relationship)
+
+        # --- Column-level lineage via sqlglot.lineage() --------------------
+        # We need to find the outermost SELECT (possibly inside INSERT/CTAS).
+        select_expr = cls._find_main_select(ast)
+        if select_expr is None:
+            return graph
+
+        for projection in select_expr.expressions:
+            target_col = projection.alias or projection.output_name
+            if not target_col:
+                continue
+
+            try:
+                root_node = sg_lineage(
+                    column=target_col,
+                    sql=sql,
+                    dialect=dialect,
+                )
+                # Walk the lineage tree for this column
+                traced_nodes = list(root_node.walk())
+            except Exception:
+                # If tracing a single column fails, skip it
+                continue
+
+            if not traced_nodes:
+                continue
+
+            # Find leaf nodes (source is a Table) — these are the real origins
+            for node in traced_nodes:
+                if not hasattr(node, "source"):
+                    continue
+                src = node.source
+                if not isinstance(src, sg_exp.Table):
+                    continue
+
+                source_table = cls._extract_table_name(src)
+                if not source_table:
+                    continue
+
+                # Resolve CTE references
+                if source_table.upper() in cte_map:
+                    resolved = source_table
+                    cte = cte_map[source_table.upper()]
+                    for tbl in cte.find_all(sg_exp.Table):
+                        real_name = cls._extract_table_name(tbl)
+                        if real_name and real_name.upper() not in cte_map:
+                            resolved = real_name
+                            break
+                    source_table = resolved
+
+                # Extract source column name from node.name
+                # node.name is like "ods_orders.shop_id" or just "shop_id"
+                node_name = node.name or ""
+                source_col = node_name.split(".")[-1] if "." in node_name else node_name
+
+                if not source_col:
+                    continue
+
+                # Determine transformation type
+                transformation = cls._detect_transformation(projection)
+
+                graph.add_column_edge(
+                    source_table=source_table,
+                    source_column=source_col,
+                    target_table=target_table,
+                    target_column=target_col,
+                    transformation=transformation,
+                )
+
+        return graph
+
+    # -- helpers ------------------------------------------------------------
+
+    @staticmethod
+    def _extract_table_name(expr: Any) -> str | None:
+        """Extract a qualified or unqualified table name from a sqlglot node."""
+        if expr is None:
+            return None
+        try:
+            from sqlglot import exp as sg_exp
+            if isinstance(expr, sg_exp.Table):
+                parts = []
+                if expr.db:
+                    parts.append(expr.db)
+                if expr.name:
+                    parts.append(expr.name)
+                return ".".join(parts) if parts else None
+            # For CREATE, the inner node may be a Schema wrapping a Table
+            if isinstance(expr, sg_exp.Schema):
+                table = expr.this
+                if isinstance(table, sg_exp.Table):
+                    parts = []
+                    if table.db:
+                        parts.append(table.db)
+                    if table.name:
+                        parts.append(table.name)
+                    return ".".join(parts) if parts else None
+            # Fallback: try .name
+            name = getattr(expr, "name", None)
+            return name if name else None
+        except Exception:
+            return None
+
+    @classmethod
+    def _extract_source_tables(cls, ast: Any, target_table: str | None = None) -> set[str]:
+        """Extract all source table names from FROM/JOIN clauses in the AST."""
+        from sqlglot import exp as sg_exp
+
+        tables: set[str] = set()
+        for table_node in ast.find_all(sg_exp.Table):
+            # Skip the target table (appears in INSERT INTO / CREATE TABLE)
+            parent = table_node.parent
+            if isinstance(parent, (sg_exp.Insert, sg_exp.Create, sg_exp.Merge)):
+                continue
+            # Also skip if wrapped in Schema (INSERT INTO table (cols) SELECT ...)
+            if isinstance(parent, sg_exp.Schema) and isinstance(
+                getattr(parent, "parent", None), (sg_exp.Insert, sg_exp.Create),
+            ):
+                continue
+            name = cls._extract_table_name(table_node)
+            if name and name.upper() not in ("DUAL",):
+                tables.add(name)
+
+        # Extra safety: remove target table if it leaked in
+        if target_table:
+            tables.discard(target_table)
+
+        return tables
+
+    @staticmethod
+    def _find_main_select(ast: Any) -> Any:
+        """Find the main SELECT expression inside an INSERT/CTAS/MERGE or a standalone SELECT."""
+        from sqlglot import exp as sg_exp
+
+        # For INSERT INTO ... SELECT, the select is a child of Insert
+        if isinstance(ast, sg_exp.Insert):
+            for child in ast.iter_expressions():
+                if isinstance(child, (sg_exp.Select, sg_exp.Union)):
+                    if isinstance(child, sg_exp.Union):
+                        # For UNION, pick the first select
+                        return child.this if hasattr(child, "this") else child
+                    return child
+        elif isinstance(ast, sg_exp.Create):
+            for child in ast.iter_expressions():
+                if isinstance(child, (sg_exp.Select, sg_exp.Union)):
+                    if isinstance(child, sg_exp.Union):
+                        return child.this if hasattr(child, "this") else child
+                    return child
+        elif isinstance(ast, sg_exp.Merge):
+            # MERGE has a USING clause with a select
+            for child in ast.iter_expressions():
+                if isinstance(child, (sg_exp.Select, sg_exp.Union)):
+                    if isinstance(child, sg_exp.Union):
+                        return child.this if hasattr(child, "this") else child
+                    return child
+        elif isinstance(ast, sg_exp.Select):
+            return ast
+        return None
+
+    @staticmethod
+    def _resolve_source_table(node: Any, cte_map: dict[str, Any]) -> str | None:
+        """Resolve the source table for a lineage node, following CTE references."""
+        from sqlglot import exp as sg_exp
+
+        # Try to get the table from the lineage node's source expression
+        source_table: str | None = None
+
+        # The node may carry a reference to its source scope / table
+        if hasattr(node, "source") and node.source is not None:
+            source_expr = node.source
+            if isinstance(source_expr, sg_exp.Table):
+                parts = []
+                if source_expr.db:
+                    parts.append(source_expr.db)
+                if source_expr.name:
+                    parts.append(source_expr.name)
+                source_table = ".".join(parts) if parts else None
+            elif hasattr(source_expr, "name"):
+                source_table = source_expr.name
+
+        # Fallback: walk up from node.expression to find a Table
+        if source_table is None and hasattr(node, "expression"):
+            expr = node.expression
+            if isinstance(expr, sg_exp.Column) and expr.table:
+                source_table = expr.table
+            elif isinstance(expr, sg_exp.Table):
+                source_table = expr.name
+
+        # If the resolved table is a CTE, try to trace through it
+        if source_table and source_table.upper() in cte_map:
+            # CTE resolution: look for the underlying table in the CTE body
+            cte = cte_map[source_table.upper()]
+            for tbl in cte.find_all(sg_exp.Table):
+                real_name = _SqlglotLineageParser._extract_table_name(tbl)
+                if real_name and real_name.upper() not in cte_map:
+                    return real_name
+            return source_table  # fallback to CTE name itself
+
+        return source_table
+
+    @staticmethod
+    def _detect_transformation(projection: Any) -> str:
+        """Detect if a projection is wrapped in an aggregate or other function."""
+        from sqlglot import exp as sg_exp
+
+        # Unwrap Alias
+        inner = projection
+        if isinstance(inner, sg_exp.Alias):
+            inner = inner.this
+
+        _agg_func_names = {
+            "SUM", "COUNT", "AVG", "MIN", "MAX", "GROUP_CONCAT",
+            "COLLECT_LIST", "COLLECT_SET", "STDDEV", "VARIANCE",
+            "FIRST", "LAST", "FIRST_VALUE", "LAST_VALUE",
+        }
+
+        if isinstance(inner, sg_exp.Anonymous):
+            func_name = inner.name.upper() if inner.name else ""
+            if func_name in _agg_func_names:
+                return f"{func_name}()"
+            return f"{func_name}()"
+
+        if isinstance(inner, (
+            sg_exp.Sum, sg_exp.Count, sg_exp.Avg, sg_exp.Min, sg_exp.Max,
+        )):
+            return f"{type(inner).__name__.upper()}()"
+
+        if isinstance(inner, sg_exp.Case):
+            return "CASE"
+
+        if isinstance(inner, sg_exp.Coalesce):
+            return "COALESCE()"
+
+        if isinstance(inner, sg_exp.Cast):
+            return "CAST()"
+
+        if isinstance(inner, sg_exp.Concat):
+            return "CONCAT()"
+
+        if isinstance(inner, sg_exp.If):
+            return "IF()"
+
+        if isinstance(inner, (sg_exp.Window,)):
+            return "WINDOW()"
+
+        if isinstance(inner, sg_exp.Func):
+            return f"{type(inner).__name__.upper()}()"
+
+        return "direct"
+
+
+# ---------------------------------------------------------------------------
+# SQL lineage parser — regex-based (fallback)
 # ---------------------------------------------------------------------------
 
 class _SQLLineageParser:
@@ -201,15 +522,28 @@ class _SQLLineageParser:
     )
 
     @classmethod
-    def parse(cls, sql: str) -> LineageGraph:
+    def parse(cls, sql: str, dialect: str = "mysql") -> LineageGraph:
         """Parse a SQL statement and extract lineage information.
+
+        Tries the precise sqlglot-based parser first; falls back to the
+        regex-based heuristic parser when sqlglot is unavailable or fails.
 
         Args:
             sql: The SQL statement to parse.
+            dialect: The SQL dialect hint passed to sqlglot (e.g. ``"mysql"``).
 
         Returns:
             A ``LineageGraph`` with table and (best-effort) column lineage.
         """
+        try:
+            import sqlglot  # noqa: F401
+            return _SqlglotLineageParser.parse(sql, dialect=dialect)
+        except ImportError:
+            logger.debug("sqlglot not installed, falling back to regex parser")
+        except Exception as exc:
+            logger.debug("sqlglot parsing failed (%s), falling back to regex", exc)
+
+        # -- regex fallback -------------------------------------------------
         graph = LineageGraph()
 
         # Detect target table
@@ -431,7 +765,7 @@ class LineageTracker:
 
     # -- Public API ---------------------------------------------------------
 
-    def parse_sql_lineage(self, sql: str) -> LineageGraph:
+    def parse_sql_lineage(self, sql: str, dialect: str = "mysql") -> LineageGraph:
         """Parse a SQL statement and extract lineage information.
 
         The parsed lineage is also merged into the tracker's global graph
@@ -440,11 +774,13 @@ class LineageTracker:
         Args:
             sql: The SQL statement to parse.  Supports INSERT INTO ... SELECT,
                 CREATE TABLE AS SELECT, and MERGE INTO statements.
+            dialect: The SQL dialect hint passed to the parser (e.g. ``"mysql"``,
+                ``"hive"``, ``"postgres"``).  Only used by the sqlglot backend.
 
         Returns:
             A ``LineageGraph`` representing the lineage of this statement.
         """
-        statement_graph = _SQLLineageParser.parse(sql)
+        statement_graph = _SQLLineageParser.parse(sql, dialect=dialect)
 
         # Merge into global graph
         for edge in statement_graph.table_edges:
@@ -462,17 +798,18 @@ class LineageTracker:
 
         return statement_graph
 
-    def parse_multiple_sql(self, sql_statements: list[str]) -> LineageGraph:
+    def parse_multiple_sql(self, sql_statements: list[str], dialect: str = "mysql") -> LineageGraph:
         """Parse multiple SQL statements and build a cumulative lineage graph.
 
         Args:
             sql_statements: List of SQL statements to parse.
+            dialect: The SQL dialect hint passed to the parser.
 
         Returns:
             The cumulative ``LineageGraph`` after parsing all statements.
         """
         for sql in sql_statements:
-            self.parse_sql_lineage(sql)
+            self.parse_sql_lineage(sql, dialect=dialect)
         return self._global_graph
 
     def trace_upstream(
@@ -648,6 +985,178 @@ class LineageTracker:
             "impact_depth": max_depth,
             "total_affected": len(affected_tables),
         }
+
+    # -- Persistence --------------------------------------------------------
+
+    async def persist_lineage(
+        self,
+        graph: LineageGraph,
+        session_factory: Any,
+    ) -> None:
+        """Persist a LineageGraph into the internal database.
+
+        Creates ``LineageNodeRecord`` and ``LineageEdgeRecord`` entries,
+        using ``session.merge()`` (upsert) to avoid duplicates.
+
+        Args:
+            graph: The lineage graph to persist.
+            session_factory: An ``async_sessionmaker`` for the internal DB.
+        """
+        from src.core.models import LineageEdgeRecord, LineageNodeRecord
+
+        async with session_factory() as session:
+            created_node_ids: set[str] = set()
+
+            # --- Table-level nodes -----------------------------------------
+            for table in graph.tables:
+                node = LineageNodeRecord(
+                    id=table,
+                    node_type="TABLE",
+                    label=table,
+                )
+                await session.merge(node)
+                created_node_ids.add(table)
+
+            # --- Column-level nodes ----------------------------------------
+            col_node_ids: set[str] = set()
+            for edge in graph.column_edges:
+                for node_id in (
+                    f"{edge.source_table}.{edge.source_column}",
+                    f"{edge.target_table}.{edge.target_column}",
+                ):
+                    if node_id not in created_node_ids and node_id not in col_node_ids:
+                        col_node = LineageNodeRecord(
+                            id=node_id,
+                            node_type="COLUMN",
+                            label=node_id,
+                        )
+                        await session.merge(col_node)
+                        col_node_ids.add(node_id)
+
+            # --- Table-level edges -----------------------------------------
+            for edge in graph.table_edges:
+                edge_id = f"tbl:{edge.source_table}->{edge.target_table}"
+                edge_rec = LineageEdgeRecord(
+                    id=edge_id,
+                    source_id=edge.source_table,
+                    target_id=edge.target_table,
+                    edge_type=edge.relationship,
+                    transformation="table_flow",
+                )
+                await session.merge(edge_rec)
+
+            # --- Column-level edges ----------------------------------------
+            for edge in graph.column_edges:
+                source_id = f"{edge.source_table}.{edge.source_column}"
+                target_id = f"{edge.target_table}.{edge.target_column}"
+                edge_id = f"col:{source_id}->{target_id}"
+                edge_rec = LineageEdgeRecord(
+                    id=edge_id,
+                    source_id=source_id,
+                    target_id=target_id,
+                    edge_type="COLUMN_FLOW",
+                    transformation=edge.transformation,
+                )
+                await session.merge(edge_rec)
+
+            await session.commit()
+
+        logger.info(
+            "Persisted lineage: %d tables, %d table edges, %d column edges",
+            len(graph.tables),
+            len(graph.table_edges),
+            len(graph.column_edges),
+        )
+
+    async def load_global_graph(self, session_factory: Any) -> LineageGraph:
+        """Load the global lineage graph from the internal database.
+
+        Reads all ``LineageNodeRecord`` and ``LineageEdgeRecord`` entries
+        and reconstructs the in-memory ``LineageGraph``.
+
+        Args:
+            session_factory: An ``async_sessionmaker`` for the internal DB.
+
+        Returns:
+            A reconstructed ``LineageGraph`` from persisted data.
+        """
+        from sqlalchemy import select
+
+        from src.core.models import LineageEdgeRecord, LineageNodeRecord
+
+        graph = LineageGraph()
+
+        async with session_factory() as session:
+            nodes_result = await session.execute(select(LineageNodeRecord))
+            nodes = nodes_result.scalars().all()
+
+            edges_result = await session.execute(select(LineageEdgeRecord))
+            edges = edges_result.scalars().all()
+
+        # Reconstruct table set from TABLE-type nodes
+        for node in nodes:
+            if node.node_type == "TABLE":
+                graph.tables.add(node.id)
+
+        # Reconstruct edges
+        for edge in edges:
+            if edge.edge_type == "COLUMN_FLOW":
+                # Parse column-level IDs: "table.column"
+                src_parts = edge.source_id.split(".", 1)
+                tgt_parts = edge.target_id.split(".", 1)
+                if len(src_parts) == 2 and len(tgt_parts) == 2:
+                    graph.add_column_edge(
+                        source_table=src_parts[0],
+                        source_column=src_parts[1],
+                        target_table=tgt_parts[0],
+                        target_column=tgt_parts[1],
+                        transformation=edge.transformation or "direct",
+                    )
+            else:
+                # Table-level edge
+                graph.add_table_edge(
+                    source=edge.source_id,
+                    target=edge.target_id,
+                    relationship=edge.edge_type,
+                )
+
+        logger.info(
+            "Loaded lineage graph: %d tables, %d table edges, %d column edges",
+            len(graph.tables),
+            len(graph.table_edges),
+            len(graph.column_edges),
+        )
+
+        # Replace the global graph
+        self._global_graph = graph
+        return graph
+
+    async def clear_lineage(self, session_factory: Any) -> int:
+        """Remove all persisted lineage data.
+
+        Deletes all ``LineageEdgeRecord`` and ``LineageNodeRecord`` rows
+        from the internal database.
+
+        Args:
+            session_factory: An ``async_sessionmaker`` for the internal DB.
+
+        Returns:
+            The total count of deleted records.
+        """
+        from sqlalchemy import delete
+
+        from src.core.models import LineageEdgeRecord, LineageNodeRecord
+
+        async with session_factory() as session:
+            # Delete edges first (FK references nodes)
+            edge_result = await session.execute(delete(LineageEdgeRecord))
+            node_result = await session.execute(delete(LineageNodeRecord))
+            await session.commit()
+
+        total = edge_result.rowcount + node_result.rowcount
+        logger.info("Cleared %d lineage records (%d edges, %d nodes)",
+                     total, edge_result.rowcount, node_result.rowcount)
+        return total
 
     # -- Internal helpers ---------------------------------------------------
 

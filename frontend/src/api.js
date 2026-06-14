@@ -38,6 +38,17 @@ export const api = {
   buildDdl: (data) => request('/ddl/build', { method: 'POST', body: JSON.stringify(data) }),
   verifyDdl: (data) => request('/ddl/verify', { method: 'POST', body: JSON.stringify(data) }),
 
+  // Lineage
+  getTableLineage: (tableId, params) => {
+    const qs = new URLSearchParams(params).toString();
+    return request(`/lineage/table/${encodeURIComponent(tableId)}${qs ? `?${qs}` : ''}`);
+  },
+  getColumnLineage: (tableId, columnName, params) => {
+    const qs = new URLSearchParams(params).toString();
+    return request(`/lineage/column/${encodeURIComponent(tableId)}/${encodeURIComponent(columnName)}${qs ? `?${qs}` : ''}`);
+  },
+  analyzeLineage: (data) => request('/lineage/analyze', { method: 'POST', body: JSON.stringify(data) }),
+
   // Agent
   chat: (data) => request('/agent/chat', { method: 'POST', body: JSON.stringify(data) }),
   listAgents: () => request('/agent/agents'),

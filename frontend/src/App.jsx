@@ -5,6 +5,7 @@ import Connections from './pages/Connections';
 import SqlQuery from './pages/SqlQuery';
 import DdlBuilder from './pages/DdlBuilder';
 import Governance from './pages/Governance';
+import Lineage from './pages/Lineage';
 
 function NotFound() {
   return (
@@ -36,6 +37,7 @@ function App() {
             <Route path="sql" element={<SqlQuery />} />
             <Route path="ddl" element={<DdlBuilder />} />
             <Route path="governance" element={<Governance />} />
+            <Route path="lineage" element={<Lineage />} />
             <Route path="*" element={<NotFound />} />
           </Route>
         </Routes>

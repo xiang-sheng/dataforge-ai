@@ -1,11 +1,12 @@
 import { NavLink, Outlet } from 'react-router-dom';
-import { Database, MessageSquare, Table, Shield, Layers } from 'lucide-react';
+import { Database, MessageSquare, Table, Shield, Layers, GitBranch } from 'lucide-react';
 
 const NAV = [
   { to: '/', icon: Database, label: '连接管理' },
   { to: '/sql', icon: MessageSquare, label: '智能问数' },
   { to: '/ddl', icon: Table, label: 'DDL 建模' },
   { to: '/governance', icon: Shield, label: '数据治理' },
+  { to: '/lineage', icon: GitBranch, label: '数据血缘' },
 ];
 
 export default function Layout() {
