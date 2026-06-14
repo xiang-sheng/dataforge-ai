@@ -84,4 +84,6 @@ logs/
 *.bak
 *.tmp
 *.temp
+*.duckdb
+*.db
 .cache/

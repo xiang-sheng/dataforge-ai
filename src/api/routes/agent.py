@@ -161,7 +161,12 @@ def _create_orchestrator(db_path: str = ":memory:", convention_file: str | None 
 #  Unified chat endpoint (routes via intent classification)
 # ---------------------------------------------------------------------------
 
-@router.post("/chat", response_model=ChatResponse)
+@router.post(
+    "/chat",
+    response_model=ChatResponse,
+    summary="统一智能对话",
+    description="自动识别用户意图并路由到对应 Agent（智能问数 / 智能建表 / 数据治理），也可通过 target_agent 直接指定。",
+)
 async def unified_chat(req: ChatRequest):
     """统一入口：自动识别意图并路由到对应 Agent。
 
@@ -195,7 +200,12 @@ async def unified_chat(req: ChatRequest):
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
-@router.get("/agents", response_model=list[AgentInfo])
+@router.get(
+    "/agents",
+    response_model=list[AgentInfo],
+    summary="列出已注册 Agent",
+    description="返回所有已注册的 Agent 信息，包括名称、描述和关键词。",
+)
 async def list_agents():
     """列出所有已注册的 Agent 及其描述。"""
     try:
@@ -210,7 +220,12 @@ async def list_agents():
 #  Direct endpoints (bypass intent routing)
 # ---------------------------------------------------------------------------
 
-@router.post("/analyze", response_model=AnalyzeResponse)
+@router.post(
+    "/analyze",
+    response_model=AnalyzeResponse,
+    summary="智能问数（直连）",
+    description="跳过意图路由，直接将自然语言问题交给 SQL Agent 进行分析、SQL 生成和验证。",
+)
 async def analyze_question(req: AnalyzeRequest):
     """智能问数：自然语言 → 思考过程 → SQL → 验证。"""
     try:
@@ -239,7 +254,12 @@ async def analyze_question(req: AnalyzeRequest):
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
-@router.post("/build-ddl", response_model=BuildDDLResponse)
+@router.post(
+    "/build-ddl",
+    response_model=BuildDDLResponse,
+    summary="智能建表（直连）",
+    description="跳过意图路由，直接从源表生成目标层级（ODS/DWD/DWS/ADS）的数仓 DDL。",
+)
 async def build_ddl(req: BuildDDLRequest):
     """ETL 建表：从源表自动生成数仓 DDL。"""
     try:

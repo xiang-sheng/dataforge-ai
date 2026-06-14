@@ -38,12 +38,27 @@ if TYPE_CHECKING:
 
 settings = get_settings()
 
-logging.basicConfig(
-    level=getattr(logging, settings.log_level, logging.INFO),
-    format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
-logger = logging.getLogger("src.main")
+_logging_yaml = Path(__file__).resolve().parent.parent / "logging.yaml"
+if _logging_yaml.is_file():
+    import logging.config
+
+    import yaml
+
+    with open(_logging_yaml, encoding="utf-8") as _f:
+        _log_cfg = yaml.safe_load(_f)
+    # Ensure log directory exists for RotatingFileHandler
+    _log_dir = Path(__file__).resolve().parent.parent / "logs"
+    _log_dir.mkdir(exist_ok=True)
+    logging.config.dictConfig(_log_cfg)
+    logger = logging.getLogger("src.main")
+    logger.debug("Logging configured from %s", _logging_yaml)
+else:
+    logging.basicConfig(
+        level=getattr(logging, settings.log_level, logging.INFO),
+        format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+    logger = logging.getLogger("src.main")
 
 
 # ------------------------------------------------------------------ #
